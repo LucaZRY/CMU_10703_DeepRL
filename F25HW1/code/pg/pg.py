@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import os
 
 
 class PolicyGradient(nn.Module):
@@ -42,6 +43,8 @@ class PolicyGradient(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_layer_size, action_size),
             # BEGIN STUDENT SOLUTION
+            # Output action probabilities for a categorical policy
+            nn.Softmax(dim=-1),
             # END STUDENT SOLUTION
         )
 
@@ -50,11 +53,16 @@ class PolicyGradient(nn.Module):
             nn.Linear(state_size, hidden_layer_size),
             nn.ReLU(),
             # BEGIN STUDENT SOLUTION
+            # Scalar state-value baseline / critic
+            nn.Linear(hidden_layer_size, 1),
             # END STUDENT SOLUTION
         )
 
         # initialize networks, optimizers, move networks to device
         # BEGIN STUDENT SOLUTION
+        self.to(self.device)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr_actor)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=lr_critic)
         # END STUDENT SOLUTION
 
     def forward(self, state):
@@ -63,26 +71,142 @@ class PolicyGradient(nn.Module):
     def get_action(self, state, stochastic):
         # if stochastic, sample using the action probabilities, else get the argmax
         # BEGIN STUDENT SOLUTION
+        with torch.no_grad():
+            state_t = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+            probs = self.actor(state_t).squeeze(0)
+            if stochastic:
+                dist = torch.distributions.Categorical(probs=probs)
+                action = dist.sample().item()
+            else:
+                action = torch.argmax(probs).item()
+        return action
         # END STUDENT SOLUTION
-        pass
 
     def calculate_n_step_bootstrap(self, rewards_tensor, values):
         # calculate n step bootstrap
         # BEGIN STUDENT SOLUTION
+        # rewards_tensor: (T,)
+        # values: (T,) predicted V(s_t)
+        T = rewards_tensor.shape[0]
+        n = self.n
+        gamma = self.gamma
+
+        targets = torch.zeros(T, dtype=torch.float32, device=rewards_tensor.device)
+        for t in range(T):
+            end = min(t + n, T)
+            G = torch.zeros(1, device=rewards_tensor.device).squeeze()
+            discount = 1.0
+            for k in range(t, end):
+                G = G + discount * rewards_tensor[k]
+                discount *= gamma
+            if end < T:
+                G = G + (discount) * values[end]
+            targets[t] = G
+        return targets
         # END STUDENT SOLUTION
-        pass
 
     def train(self, states, actions, rewards):
         # train the agent using states, actions, and rewards
         # BEGIN STUDENT SOLUTION
+        states_t = torch.as_tensor(np.array(states), dtype=torch.float32, device=self.device)
+        actions_t = torch.as_tensor(np.array(actions), dtype=torch.int64, device=self.device)
+        rewards_t = torch.as_tensor(np.array(rewards, dtype=np.float32), dtype=torch.float32, device=self.device)
+
+        T = states_t.shape[0]
+        probs = self.actor(states_t)                          
+        log_probs = torch.log(probs.clamp_min(1e-8))        
+        selected_log_probs = log_probs.gather(1, actions_t.view(-1, 1)).squeeze(1)  
+
+        values = self.critic(states_t).squeeze(-1)             
+
+        if self.mode == "REINFORCE":
+            returns = torch.zeros(T, dtype=torch.float32, device=self.device)
+            G = 0.0
+            for t in reversed(range(T)):
+                G = rewards_t[t] + self.gamma * G
+                returns[t] = G
+            advantages = returns.detach()
+            actor_loss = -(advantages * selected_log_probs).mean()
+
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+            return actor_loss.item()
+
+        elif self.mode == "REINFORCE_WITH_BASELINE":
+            returns = torch.zeros(T, dtype=torch.float32, device=self.device)
+            G = 0.0
+            for t in reversed(range(T)):
+                G = rewards_t[t] + self.gamma * G
+                returns[t] = G
+
+            advantages = (returns - values.detach())
+            actor_loss = -(advantages * selected_log_probs).mean()
+
+            critic_loss = F.mse_loss(values, returns)
+
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            self.critic_optimizer.step()
+
+            return (actor_loss.item(), critic_loss.item())
+
+        elif self.mode == "A2C":
+            with torch.no_grad():
+                targets = self.calculate_n_step_bootstrap(rewards_t, values)
+
+            advantages = (targets - values.detach())
+            actor_loss = -(advantages * selected_log_probs).mean()
+
+            critic_loss = F.mse_loss(values, targets)
+
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            self.critic_optimizer.step()
+
+            return (actor_loss.item(), critic_loss.item())
+
+        else:
+            raise ValueError(f"Unknown mode: {self.mode}")
         # END STUDENT SOLUTION
-        pass
 
     def run(self, env, max_steps, num_episodes, train):
         total_rewards = []
 
         # run the agent through the environment num_episodes times for at most max steps
         # BEGIN STUDENT SOLUTION
+        stochastic = True if train else False
+
+        for _ in range(num_episodes):
+            obs, info = env.reset()
+            ep_reward = 0.0
+            states, actions, rewards = [], [], []
+
+            for _step in range(max_steps):
+                action = self.get_action(obs, stochastic=stochastic)
+                next_obs, reward, terminated, truncated, info = env.step(action)
+
+                states.append(obs)
+                actions.append(action)
+                rewards.append(reward)
+                ep_reward += reward
+
+                obs = next_obs
+                if terminated or truncated:
+                    break
+
+            if train:
+                self.train(states, actions, rewards)
+
+            total_rewards.append(ep_reward)
         # END STUDENT SOLUTION
         return total_rewards
 
@@ -103,6 +227,28 @@ def graph_agents(
 
     # graph the data mentioned in the homework pdf
     # BEGIN STUDENT SOLUTION
+    os.makedirs("./graphs", exist_ok=True)
+
+    num_trials = len(agents)
+    num_eval_points = num_episodes // graph_every
+    D = np.zeros((num_trials, num_eval_points), dtype=np.float32)
+
+    for trial, agent in enumerate(agents):
+        eval_idx = 0
+        episodes_done = 0
+
+        while episodes_done < num_episodes:
+
+            agent.run(env, max_steps, graph_every, train=True)
+            episodes_done += graph_every
+
+            eval_rewards = agent.run(env, max_steps, num_test_episodes, train=False)
+            D[trial, eval_idx] = float(np.mean(eval_rewards))
+            eval_idx += 1
+
+    average_total_rewards = np.mean(D, axis=0)
+    min_total_rewards = np.min(D, axis=0)
+    max_total_rewards = np.max(D, axis=0)
     # END STUDENT SOLUTION
 
     # plot the total rewards
@@ -166,6 +312,44 @@ def main():
 
     # init args, agents, and call graph_agents on the initialized agents
     # BEGIN STUDENT SOLUTION
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    env = gym.make(args.env_name)
+
+    agents = []
+    for seed in range(args.num_runs):
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+        dummy_env = gym.make(args.env_name)
+        state_size = dummy_env.observation_space.shape[0]
+        action_size = dummy_env.action_space.n
+        dummy_env.close()
+
+        agent = PolicyGradient(
+            state_size=state_size,
+            action_size=action_size,
+            lr_actor=1e-3,
+            lr_critic=1e-3,
+            mode=args.mode,
+            n=args.n,
+            gamma=0.99,
+            device=device,
+        )
+        agents.append(agent)
+
+    graph_name = args.mode
+    graph_agents(
+        graph_name=graph_name,
+        agents=agents,
+        env=env,
+        max_steps=args.max_steps,
+        num_episodes=args.num_episodes,
+        num_test_episodes=args.num_test_episodes,
+        graph_every=args.graph_every,
+    )
+
+    env.close()
     # END STUDENT SOLUTION
 
 
