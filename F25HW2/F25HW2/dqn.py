@@ -30,11 +30,11 @@ class ReplayMemory():
         batch = random.sample(self.buffer, self.batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
 
-        # states      = torch.tensor(np.array(states), dtype=torch.float32)
-        # actions     = torch.tensor(np.array(actions), dtype=torch.int64).unsqueeze(1)
-        # rewards     = torch.tensor(np.array(rewards), dtype=torch.float32).unsqueeze(1)
-        # next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
-        # dones       = torch.tensor(np.array(dones), dtype=torch.float32).unsqueeze(1)
+        states      = torch.tensor(np.array(states), dtype=torch.float32)
+        actions     = torch.tensor(np.array(actions), dtype=torch.int64).unsqueeze(1)
+        rewards     = torch.tensor(np.array(rewards), dtype=torch.float32).unsqueeze(1)
+        next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
+        dones       = torch.tensor(np.array(dones), dtype=torch.float32).unsqueeze(1)
 
         return states, actions, rewards, next_states, dones
         # END STUDENT SOLUTION
@@ -217,8 +217,8 @@ def main():
                 total_reward += reward
                 global_step += 1
 
-                if len(agent.replay.buffer) >= max(agent.replay.batch_size, agent.burn_in):
-                    states, actions, rewards, next_states, dones = agent.replay.sample_batch()
+                if len(agent.replay_memory.buffer) >= max(agent.replay_memory.batch_size, agent.burn_in):
+                    states, actions, rewards, next_states, dones = agent.replay_memory.sample_batch()
                     states = states.to(device)
                     actions = actions.to(device)            # (B,1)
                     rewards = rewards.to(device)            # (B,1)
