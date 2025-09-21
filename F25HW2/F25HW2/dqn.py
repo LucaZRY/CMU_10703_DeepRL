@@ -19,8 +19,9 @@ class ReplayMemory():
         # define init params
         # use collections.deque 
         # BEGIN STUDENT SOLUTION
-        self.buffer = collections.deque(maxlen=memory_size)
         self.batch_size = batch_size
+        self.memory_size = memory_size
+        self.buffer = collections.deque(maxlen=memory_size)
         # END STUDENT SOLUTION
         # pass
 
@@ -30,11 +31,11 @@ class ReplayMemory():
         batch = random.sample(self.buffer, self.batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
 
-        states      = torch.tensor(np.array(states), dtype=torch.float32)
-        actions     = torch.tensor(np.array(actions), dtype=torch.int64).unsqueeze(1)
-        rewards     = torch.tensor(np.array(rewards), dtype=torch.float32).unsqueeze(1)
-        next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
-        dones       = torch.tensor(np.array(dones), dtype=torch.float32).unsqueeze(1)
+        states      = torch.as_tensor(np.array(states), dtype=torch.float32)           #as_tensor?
+        actions     = torch.as_tensor(np.array(actions), dtype=torch.int64).unsqueeze(1)
+        rewards     = torch.as_tensor(np.array(rewards), dtype=torch.float32).unsqueeze(1)
+        next_states = torch.as_tensor(np.array(next_states), dtype=torch.float32)
+        dones       = torch.as_tensor(np.array(dones), dtype=torch.float32).unsqueeze(1)
 
         return states, actions, rewards, next_states, dones
         # END STUDENT SOLUTION
@@ -84,12 +85,13 @@ class DeepQNetwork(nn.Module):
         # BEGIN STUDENT SOLUTION
         self.replay_memory = ReplayMemory(replay_buffer_size, replay_buffer_batch_size)
 
-        self.q = q_net_init().to(self.device)
-        self.target_q = q_net_init().to(self.device)
-        self.target_q.load_state_dict(self.q.state_dict())
-        self.target_q.eval()
+        self.q_net = q_net_init().to(self.device)
+        self.target_net = q_net_init().to(self.device)
+        self.target_net.load_state_dict(self.q_net.state_dict())
+        self.target_net.eval()
 
-        self.optimizer = optim.Adam(self.q.parameters(), lr=lr_q_net)
+        self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr_q_net)
+        self.train_steps = 0
         # END STUDENT SOLUTION
 
 
@@ -97,18 +99,16 @@ class DeepQNetwork(nn.Module):
         # calculate q value and target
         # use the correct network for the target based on self.double_dqn
         # BEGIN STUDENT SOLUTION
-        q_values = self.q(state)
-
+        q_values = self.q_net(state)  # [B, A]
         with torch.no_grad():
             if self.double_dqn:
-                next_q_values = self.q(new_state)
-                next_actions = next_q_values.argmax(dim=1, keepdim=True)
-
-                next_q_target = self.target_q(new_state)
-                target_q_values = next_q_target.gather(1, next_actions).squeeze(1)
+                # a* = argmax_a Q_online(s', a)
+                a_star = torch.argmax(self.q_net(new_state), dim=1)  # [B]
+                target_next_all = self.target_net(new_state)         # [B, A]
+                target_q_values = target_next_all.gather(1, a_star.unsqueeze(1)).squeeze(1)  # [B]
             else:
-                target_q_values = self.target_q(new_state).max(dim=1).values
-
+                target_next_all = self.target_net(new_state)         # [B, A]
+                target_q_values = torch.max(target_next_all, dim=1).values  # [B]
         return q_values, target_q_values
         # END STUDENT SOLUTION
 
@@ -117,11 +117,11 @@ class DeepQNetwork(nn.Module):
         # if stochastic, sample using epsilon greedy, else get the argmax
         # BEGIN STUDENT SOLUTION
         if stochastic and random.random() < self.epsilon:
-            return random.randint(0, self.action_size - 1)
+            return random.randrange(self.action_size)
+        s = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.no_grad():
-            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.q(state)
-            return q_values.argmax(dim = 1).item()
+            q = self.q_net(s)  # [1, A]
+        return int(torch.argmax(q, dim=1).item())
         # END STUDENT SOLUTION
         # pass
 
@@ -134,9 +134,13 @@ def graph_agents(
 
     # graph the data mentioned in the homework pdf
     # BEGIN STUDENT SOLUTION
-    average_total_rewards = []
-    min_total_rewards = []
-    max_total_rewards = []
+    import os
+    os.makedirs("./graphs", exist_ok=True)
+
+    D = np.array(mean_undiscounted_returns, dtype=np.float32)  # [num_runs, num_checkpoints]
+    average_total_rewards = D.mean(axis=0)
+    min_total_rewards = D.min(axis=0)
+    max_total_rewards = D.max(axis=0)
     # END STUDENT SOLUTION
 
     # plot the total rewards
@@ -178,112 +182,114 @@ def main():
     # BEGIN STUDENT SOLUTION
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f'Using device: {device}')
+
+    env_name = args.env_name
     num_runs = args.num_runs
     num_episodes = args.num_episodes
-    max_steps = args.max_steps
-    env_name = args.env_name
     test_frequency = args.test_frequency
+    max_steps = args.max_steps
+    double_flag = args.double_dqn
 
-    all_runs_returns = []
+    all_runs_eval = []
+
+    TEST_EPISODES = 20  
 
     for run in range(num_runs):
         env = gym.make(env_name)
-        obs, info = env.reset(seed=run)
+        obs, info = env.reset(seed=random.randint(0, 10_000_000))
         state_size = env.observation_space.shape[0]
         action_size = env.action_space.n
 
-        agent = DeepQNetwork(state_size, action_size, 
-                             double_dqn = args.double_dqn,
-                             device = device)
-        
-        test_returns = []
+        agent = DeepQNetwork(
+            state_size, action_size, double_dqn=double_flag,
+            lr_q_net=2e-4, gamma=0.99, epsilon=0.05,
+            target_update=1000,  
+            burn_in=10000, replay_buffer_size=50000,
+            replay_buffer_batch_size=32, device=device
+        ).to(device)
+
+        # burn-in
+        while len(agent.replay_memory.buffer) < agent.burn_in:
+            action = env.action_space.sample()
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+            agent.replay_memory.append((obs, action, reward, next_obs, done))
+            if done:
+                obs, info = env.reset()
+            else:
+                obs = next_obs
+
+        # training loop
+        run_eval = []  
         global_step = 0
-
-        for episode in range(1, num_episodes+1):
+        for ep in range(1, num_episodes + 1):
             obs, info = env.reset()
-            total_reward = 0.0
-
-            for step in range(max_steps):
+            ep_steps = 0
+            done = False
+            while not done and ep_steps < max_steps:
                 action = agent.get_action(obs, stochastic=True)
-                step_out = env.step(action)
-                if len(step_out) == 5:
-                    new_obs, reward, terminated, truncated, info = step_out
-                    done = terminated or truncated
-                else:
-                    new_obs, reward, done, info = step_out
-
-                agent.replay_memory.append((obs, action, reward, new_obs, done))
-                obs = new_obs
-                total_reward += reward
+                next_obs, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
+                agent.replay_memory.append((obs, action, reward, next_obs, done))
+                obs = next_obs
+                ep_steps += 1
                 global_step += 1
 
-                if len(agent.replay_memory.buffer) >= max(agent.replay_memory.batch_size, agent.burn_in):
+                if len(agent.replay_memory.buffer) >= agent.burn_in:
                     states, actions, rewards, next_states, dones = agent.replay_memory.sample_batch()
                     states = states.to(device)
-                    actions = actions.to(device)            # (B,1)
-                    rewards = rewards.to(device)            # (B,1)
+                    actions = actions.to(device)
+                    rewards = rewards.to(device)
                     next_states = next_states.to(device)
-                    dones = dones.to(device)                # (B,1)
+                    dones = dones.to(device)
 
-                    # Q(s,a; θ)
-                    q_sa = agent.q(states).gather(1, actions)
+                    q_values, target_next = agent.forward(states, next_states)
+                    q_sa = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+                    targets = rewards + (1.0 - dones) * agent.gamma * target_next
 
-                    # targets
-                    with torch.no_grad():
-                        if agent.double_dqn:
-                            next_actions = agent.q(next_states).argmax(dim=1, keepdim=True)
-                            next_q = agent.target_q(next_states).gather(1, next_actions)
-                        else:
-                            next_q = agent.target_q(next_states).max(dim=1, keepdim=True).values
-                        targets = rewards + (1.0 - dones) * agent.gamma * next_q
+                    loss = F.mse_loss(q_sa, targets)
 
-                    loss = F.smooth_l1_loss(q_sa, targets)
                     agent.optimizer.zero_grad()
                     loss.backward()
-                    nn.utils.clip_grad_norm_(agent.q.parameters(), 10.0)
                     agent.optimizer.step()
 
-                    # periodic target update
                     if global_step % agent.target_update == 0:
-                        agent.target_q.load_state_dict(agent.q.state_dict())
+                        agent.target_net.load_state_dict(agent.q_net.state_dict())
 
-                if done:
-                    break
 
-            if episode % test_frequency == 0:
+            if ep % test_frequency == 0:
                 eval_returns = []
-                for _ in range(5):
-                    reset_out = env.reset()
-                    test_obs = reset_out[0] if isinstance(reset_out, tuple) else reset_out
-                    R = 0.0
-                    for _ in range(max_steps):
-                        test_action = agent.get_action(test_obs, stochastic=False)
-                        step_out = env.step(test_action)
-                        if len(step_out) == 5:
-                            test_obs, r_eval, term, trunc, _ = step_out
-                            d_eval = term or trunc
-                        else:
-                            test_obs, r_eval, d_eval, _ = step_out
-                        R += r_eval
-                        if d_eval:
-                            break
-                    eval_returns.append(R)
-                mean_eval = float(np.mean(eval_returns))
-                test_returns.append(mean_eval)
-                print(f'Run: {run+1}, Episode: {episode}, Eval Avg Return: {mean_eval:.1f}')
+                for _ in range(TEST_EPISODES):
+                    e = gym.make(env_name)
+                    s, _ = e.reset(seed=random.randint(0, 10_000_000))
+                    total_r = 0.0
+                    d = False
+                    steps = 0
+                    while not d and steps < max_steps:
+                        a = agent.get_action(s, stochastic=False)
+                        s, r, term, trunc, _ = e.step(a)
+                        d = term or trunc
+                        total_r += r
+                        steps += 1
+                    e.close()
+                    mean_ret = float(np.mean(eval_returns))
+                    print(f"Run: {run+1}, Episode: {ep}, Eval Avg Return: {mean_ret:.1f}")
+                    run_eval.append(mean_ret)
+                    eval_returns.append(total_r)
+                run_eval.append(float(np.mean(eval_returns)))
 
+                
         env.close()
-        all_runs_returns.append(test_returns)
+        all_runs_eval.append(run_eval)
 
-    graph_agents(
-        graph_name=f"DQN_{'Double' if args.double_dqn else 'Vanilla'}_{env_name}",
-        mean_undiscounted_returns=all_runs_returns,
-        test_frequency=test_frequency,
-        max_steps=max_steps,
-        num_episodes=num_episodes,)
+        print(f"[Run {run+1}] checkpoints collected:", len(run_eval))
+        assert len(run_eval) > 0, "No eval checkpoints collected. Did ep % test_frequency fire? Check num_episodes and test_frequency."
+
+
+    graph_name = f"{'Double DQN' if double_flag else 'DQN'} on {env_name}"
+    graph_agents(graph_name, all_runs_eval, test_frequency, max_steps, num_episodes)
     
     # END STUDENT SOLUTION
-
 
 
 if '__main__' == __name__:
