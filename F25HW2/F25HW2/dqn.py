@@ -17,36 +17,37 @@ import torch.optim as optim
 class ReplayMemory():
     def __init__(self, memory_size, batch_size):
         # define init params
-        # use collections.deque 
+        # use collections.deque
         # BEGIN STUDENT SOLUTION
-        self.batch_size = batch_size
         self.memory_size = memory_size
+        self.batch_size = batch_size
         self.buffer = collections.deque(maxlen=memory_size)
         # END STUDENT SOLUTION
-        # pass
+        pass
+
 
     def sample_batch(self):
         # randomly chooses from the collections.deque
         # BEGIN STUDENT SOLUTION
-        batch = random.sample(self.buffer, self.batch_size)
+        batch = random.sample(self.buffer, k=self.batch_size)
+        # each transition: (state, action, reward, next_state, done)
         states, actions, rewards, next_states, dones = zip(*batch)
-
-        states      = torch.as_tensor(np.array(states), dtype=torch.float32)           #as_tensor?
-        actions     = torch.as_tensor(np.array(actions), dtype=torch.int64).unsqueeze(1)
-        rewards     = torch.as_tensor(np.array(rewards), dtype=torch.float32).unsqueeze(1)
-        next_states = torch.as_tensor(np.array(next_states), dtype=torch.float32)
-        dones       = torch.as_tensor(np.array(dones), dtype=torch.float32).unsqueeze(1)
-
+        states = torch.as_tensor(np.array(states, dtype=np.float32))
+        actions = torch.as_tensor(np.array(actions, dtype=np.int64))
+        rewards = torch.as_tensor(np.array(rewards, dtype=np.float32))
+        next_states = torch.as_tensor(np.array(next_states, dtype=np.float32))
+        dones = torch.as_tensor(np.array(dones, dtype=np.float32))
         return states, actions, rewards, next_states, dones
         # END STUDENT SOLUTION
-        # pass
+        pass
+
 
     def append(self, transition):
         # append to the collections.deque
         # BEGIN STUDENT SOLUTION
         self.buffer.append(transition)
         # END STUDENT SOLUTION
-        # pass
+        pass
 
 
 
@@ -75,8 +76,6 @@ class DeepQNetwork(nn.Module):
             nn.Linear(state_size, hidden_layer_size),
             nn.ReLU(),
             # BEGIN STUDENT SOLUTION
-            # nn.Linear(hidden_layer_size, hidden_layer_size),
-            # nn.ReLU(),
             nn.Linear(hidden_layer_size, action_size)
             # END STUDENT SOLUTION
         )
@@ -99,6 +98,7 @@ class DeepQNetwork(nn.Module):
         # calculate q value and target
         # use the correct network for the target based on self.double_dqn
         # BEGIN STUDENT SOLUTION
+        # state/new_state: shape [B, state_size]
         q_values = self.q_net(state)  # [B, A]
         with torch.no_grad():
             if self.double_dqn:
@@ -123,7 +123,7 @@ class DeepQNetwork(nn.Module):
             q = self.q_net(s)  # [1, A]
         return int(torch.argmax(q, dim=1).item())
         # END STUDENT SOLUTION
-        # pass
+        pass
 
 
 
@@ -134,6 +134,8 @@ def graph_agents(
 
     # graph the data mentioned in the homework pdf
     # BEGIN STUDENT SOLUTION
+    # mean_undiscounted_returns is expected to be a list (num_runs) of lists (num_checkpoints)
+    # Build mean curve with min/max shaded band.
     import os
     os.makedirs("./graphs", exist_ok=True)
 
@@ -180,9 +182,7 @@ def main():
 
     # init args, agents, and call graph_agent on the initialized agents
     # BEGIN STUDENT SOLUTION
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f'Using device: {device}')
-
+    device = "cpu"
     env_name = args.env_name
     num_runs = args.num_runs
     num_episodes = args.num_episodes
@@ -190,9 +190,10 @@ def main():
     max_steps = args.max_steps
     double_flag = args.double_dqn
 
+    # storage for per-run evaluation checkpoints
     all_runs_eval = []
 
-    TEST_EPISODES = 20  
+    TEST_EPISODES = 20  # per PDF: run 20 independent tests at each checkpoint
 
     for run in range(num_runs):
         env = gym.make(env_name)
@@ -203,12 +204,12 @@ def main():
         agent = DeepQNetwork(
             state_size, action_size, double_dqn=double_flag,
             lr_q_net=2e-4, gamma=0.99, epsilon=0.05,
-            target_update=1000,  
+            target_update=1000,  # steps (hard update)
             burn_in=10000, replay_buffer_size=50000,
             replay_buffer_batch_size=32, device=device
         ).to(device)
 
-        # burn-in
+        # burn-in replay with random policy
         while len(agent.replay_memory.buffer) < agent.burn_in:
             action = env.action_space.sample()
             next_obs, reward, terminated, truncated, _ = env.step(action)
@@ -220,7 +221,7 @@ def main():
                 obs = next_obs
 
         # training loop
-        run_eval = []  
+        run_eval = []  # list of mean returns at checkpoints
         global_step = 0
         for ep in range(1, num_episodes + 1):
             obs, info = env.reset()
@@ -235,8 +236,10 @@ def main():
                 ep_steps += 1
                 global_step += 1
 
+                # one gradient step once we have burn-in
                 if len(agent.replay_memory.buffer) >= agent.burn_in:
                     states, actions, rewards, next_states, dones = agent.replay_memory.sample_batch()
+                    # move to device
                     states = states.to(device)
                     actions = actions.to(device)
                     rewards = rewards.to(device)
@@ -256,8 +259,9 @@ def main():
                     if global_step % agent.target_update == 0:
                         agent.target_net.load_state_dict(agent.q_net.state_dict())
 
-
+            # evaluate every test_frequency episodes
             if ep % test_frequency == 0:
+                # greedy evaluation (ε=0)
                 eval_returns = []
                 for _ in range(TEST_EPISODES):
                     e = gym.make(env_name)
@@ -272,26 +276,17 @@ def main():
                         total_r += r
                         steps += 1
                     e.close()
-                    mean_ret = float(np.mean(eval_returns))
-                    print(f"Run: {run+1}, Episode: {ep}, Eval Avg Return: {mean_ret:.1f}")
-                    run_eval.append(mean_ret)
                     eval_returns.append(total_r)
                 run_eval.append(float(np.mean(eval_returns)))
 
-                
         env.close()
         all_runs_eval.append(run_eval)
 
-        print(f"[Run {run+1}] checkpoints collected:", len(run_eval))
-        assert len(run_eval) > 0, "No eval checkpoints collected. Did ep % test_frequency fire? Check num_episodes and test_frequency."
-
-
     graph_name = f"{'Double DQN' if double_flag else 'DQN'} on {env_name}"
     graph_agents(graph_name, all_runs_eval, test_frequency, max_steps, num_episodes)
-    
     # END STUDENT SOLUTION
+
 
 
 if '__main__' == __name__:
     main()
-
