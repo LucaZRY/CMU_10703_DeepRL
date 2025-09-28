@@ -75,7 +75,26 @@ class PPOAgent:
         ret = {}
         # ---------------- Problem 1.3.1: PPO Update ----------------
         ### BEGIN STUDENT SOLUTION - 1.3.1 ###
+        if stop or self._steps_collected_with_curr_policy >= self.rollout_steps:
+            # 1) compute advantages and returns (GAE)
+            advantages, returns = self._compute_gae(self._curr_policy_rollout)
 
+            # 2) normalize advantages (standard PPO trick)
+            adv_mean = advantages.mean()
+            adv_std = advantages.std() + 1e-8
+            advantages = (advantages - adv_mean) / adv_std
+
+            # 3) collate tensors for training
+            batch = self._prepare_batch(advantages, returns)
+            self._last_batch = batch  # keep for _perform_update()
+
+            # 4) do the PPO update
+            ret = self._perform_update()
+
+            # 5) reset rollout buffers and bump policy iteration
+            self._curr_policy_rollout = []
+            self._steps_collected_with_curr_policy = 0
+            self._policy_iteration += 1
         ### END STUDENT SOLUTION - 1.3.1 ###
 
         return ret  # Leave this as an empty dictionary if no update is performed
@@ -125,7 +144,17 @@ class PPOAgent:
 
         # ---------------- Problem 1.2: Compute GAE ----------------
         ### BEGIN STUDENT SOLUTION - 1.2 ###
-        
+        values_ext = np.append(values, final_v).astype(np.float32)
+
+        advantages = np.zeros(T, dtype=np.float32)
+        lastgaelam = 0.0
+        for t in reversed(range(T)):
+            nonterminal = 1.0 - float(dones[t])  # 0 if done at t, else 1
+            delta = rewards[t] + self.gamma * values_ext[t + 1] * nonterminal - values_ext[t]
+            lastgaelam = delta + self.gamma * self.gae_lambda * nonterminal * lastgaelam
+            advantages[t] = lastgaelam
+
+        returns = advantages + values_ext[:-1]
         ### END STUDENT SOLUTION - 1.2 ###
         
         return advantages, returns
@@ -155,7 +184,11 @@ class PPOAgent:
         
         # ---------------- Problem 1.1.1: PPO Clipped Surrogate Objective Loss ----------------
         ### BEGIN STUDENT SOLUTION - 1.1.1 ###
-
+        ratio       = torch.exp(log_probs - old_log_probs)
+        unclipped   = ratio * advantages
+        clipped     = torch.clamp(ratio, 1 - self.clip_coef, 1 + self.clip_coef) * advantages
+        policy_loss = -torch.min(unclipped, clipped).mean()
+        total_loss  = policy_loss
         ### END STUDENT SOLUTION - 1.1.1 ###
         
         
@@ -168,7 +201,10 @@ class PPOAgent:
 
         # ---------------- Problem 1.1.2: PPO Total Loss (Include Entropy Bonus and Value Loss) ----------------
         ### BEGIN STUDENT SOLUTION - 1.1.2 ###
-
+        entropy_loss = - self.ent_coef * entropy.mean()
+        value_loss   = (returns - values.squeeze(-1))**2
+        value_loss   = value_loss.mean()
+        total_loss   = policy_loss + self.vf_coef * value_loss + entropy_loss
         ### END STUDENT SOLUTION - 1.1.2 ###
 
         # Stats
