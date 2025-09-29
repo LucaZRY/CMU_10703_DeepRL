@@ -75,23 +75,21 @@ class PPOAgent:
         ret = {}
         # ---------------- Problem 1.3.1: PPO Update ----------------
         ### BEGIN STUDENT SOLUTION - 1.3.1 ###
-        if stop or self._steps_collected_with_curr_policy >= self.rollout_steps:
-            # 1) compute advantages and returns (GAE)
+        if stop:
             advantages, returns = self._compute_gae(self._curr_policy_rollout)
 
-            # 2) normalize advantages (standard PPO trick)
             adv_mean = advantages.mean()
             adv_std = advantages.std() + 1e-8
             advantages = (advantages - adv_mean) / adv_std
 
-            # 3) collate tensors for training
             batch = self._prepare_batch(advantages, returns)
-            self._last_batch = batch  # keep for _perform_update()
+            self._last_batch = batch  # used by _perform_update()
 
-            # 4) do the PPO update
+        if self._steps_collected_with_curr_policy >= self.rollout_steps:
+            # Lines 11–12: optimize for K epochs (in _perform_update) and then advance policy
             ret = self._perform_update()
 
-            # 5) reset rollout buffers and bump policy iteration
+            # Reset counters/rollout for the next policy iteration (θ_old ← θ)
             self._curr_policy_rollout = []
             self._steps_collected_with_curr_policy = 0
             self._policy_iteration += 1
@@ -109,7 +107,66 @@ class PPOAgent:
         
         # ---------------- Problem 1.3.2: PPO Update ----------------
         ### BEGIN STUDENT SOLUTION - 1.3.2 ###
+        # assert hasattr(self, "_last_batch"), "No batch prepared. Call step() until an update is triggered first."
+        # batch = self._last_batch
 
+        # N = batch["obs"].shape[0]
+        # for _ in range(self.update_epochs):
+        #     # shuffle indices each epoch
+        #     perm = torch.randperm(N, device=self.device)
+        #     for start in range(0, N, self.minibatch_size):
+        #         idx = perm[start:start + self.minibatch_size]
+
+        #         # slice a minibatch
+        #         minibatch = {
+        #             "obs": batch["obs"][idx],
+        #             "actions": batch["actions"][idx],
+        #             "log_probs": batch["log_probs"][idx],
+        #             "advantages": batch["advantages"][idx],
+        #             "returns": batch["returns"][idx],
+        #         }
+
+        #         # compute loss and take an optimizer step
+        #         self.optimizer.zero_grad()
+        #         loss, stats = self._ppo_loss(minibatch)
+        #         all_stats.append(stats)
+
+        #         loss.backward()
+        #         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+        #         self.optimizer.step()
+
+        if not hasattr(self, "_device_wrap_applied"):
+            orig_forward = self.actor.forward
+            def _wrapped_forward(obs):
+                dev = next(self.actor.parameters()).device
+                return orig_forward(obs.to(dev))
+            self.actor.forward = _wrapped_forward  # monkey-patch
+            self._device_wrap_applied = True
+
+        # Train on the most recent rollout for multiple epochs with shuffled minibatches
+        assert hasattr(self, "_last_batch"), "No prepared batch. Collect a rollout first."
+        batch = self._last_batch
+        N = batch["obs"].shape[0]
+
+        for _ in range(self.update_epochs):
+            perm = torch.randperm(N, device=self.device)
+            for start in range(0, N, self.minibatch_size):
+                idx = perm[start:start + self.minibatch_size]
+                minibatch = {
+                    "obs": batch["obs"][idx],
+                    "actions": batch["actions"][idx],
+                    "log_probs": batch["log_probs"][idx],
+                    "advantages": batch["advantages"][idx],
+                    "returns": batch["returns"][idx],
+                }
+
+                self.optimizer.zero_grad(set_to_none=True)
+                loss, stats = self._ppo_loss(minibatch)
+                all_stats.append(stats)
+
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+                self.optimizer.step()
         ### EXPERIMENT 1.6 CODE ###
 
         ### EXPERIMENT 1.6 CODE END ###
@@ -144,8 +201,9 @@ class PPOAgent:
 
         # ---------------- Problem 1.2: Compute GAE ----------------
         ### BEGIN STUDENT SOLUTION - 1.2 ###
-        values_ext = np.append(values, final_v).astype(np.float32)
-
+        # values_ext = np.append(values, final_v).astype(np.float32)
+        values_ext = np.append(values.astype(np.float32), np.float32(final_v))
+        
         advantages = np.zeros(T, dtype=np.float32)
         lastgaelam = 0.0
         for t in reversed(range(T)):
@@ -186,7 +244,7 @@ class PPOAgent:
         ### BEGIN STUDENT SOLUTION - 1.1.1 ###
         ratio       = torch.exp(log_probs - old_log_probs)
         unclipped   = ratio * advantages
-        clipped     = torch.clamp(ratio, 1 - self.clip_coef, 1 + self.clip_coef) * advantages
+        clipped     = torch.clamp(ratio, 1.0 - self.clip_coef, 1.0 + self.clip_coef) * advantages
         policy_loss = -torch.min(unclipped, clipped).mean()
         total_loss  = policy_loss
         ### END STUDENT SOLUTION - 1.1.1 ###
