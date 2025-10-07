@@ -39,7 +39,33 @@ class TD3Agent:
         
         # ================== Problem 2.1.1: TD3 initialization ==================
         ### BEGIN STUDENT SOLUTION - 2.1.1 ###
-        
+
+        self.actor = Actor(
+            obs_dim=self.obs_dim,
+            act_dim=self.act_dim,
+            act_low=self.act_low,
+            act_high=self.act_high,
+            hidden=(64, 64)
+        ).to(self.device)
+
+        self.critic1 = Critic(self.obs_dim, self.act_dim, hidden=(64, 64)).to(self.device)
+        self.critic2 = Critic(self.obs_dim, self.act_dim, hidden=(64, 64)).to(self.device)
+
+        # Target networks
+        self.target_actor = Actor(
+            obs_dim=self.obs_dim,
+            act_dim=self.act_dim,
+            act_low=self.act_low,
+            act_high=self.act_high,
+            hidden=(64, 64)
+        ).to(self.device)
+        self.target_critic1 = Critic(self.obs_dim, self.act_dim, hidden=(64, 64)).to(self.device)
+        self.target_critic2 = Critic(self.obs_dim, self.act_dim, hidden=(64, 64)).to(self.device)
+
+        # Initialize targets = online
+        self.target_actor.load_state_dict(self.actor.state_dict())
+        self.target_critic1.load_state_dict(self.critic1.state_dict())
+        self.target_critic2.load_state_dict(self.critic2.state_dict())
         ### END STUDENT SOLUTION  -  2.1.1 ###
         
         # Optimizers
@@ -67,6 +93,12 @@ class TD3Agent:
             
             # ---------------- Problem 2.2: Exploration noise at action time ----------------
             ### BEGIN STUDENT SOLUTION - 2.2 ###
+            action = self.actor(obs_t).mean_action
+
+            noise = torch.randn_like(action) * self.exploration_noise
+            action = action + noise
+
+            action = torch.max(torch.min(action, self.act_high), self.act_low)
 
             ### END STUDENT SOLUTION  -  2.2 ###
             
@@ -102,6 +134,11 @@ class TD3Agent:
         # ---------------- Problem 2.4: Exploration noise at action time ----------------
         ### BEGIN STUDENT SOLUTION - 2.4 ###
 
+        if (self.total_steps < self.warmup_steps) or (self._buffer.size < self.batch_size):
+            return {}
+        if (self.total_steps % self.update_every) != 0:
+            return {}
+
         ### END STUDENT SOLUTION - 2.4 ###
         
         # Perform TD3 updates
@@ -121,7 +158,12 @@ class TD3Agent:
             
             # ---------------- Problem 2.3: Delayed policy updates ----------------
             ### BEGIN STUDENT SOLUTION - 2.3 ###
-
+            if self._buffer.size < self.batch_size:
+                return {}
+            
+            do_actor_update = (self._update_count % self.policy_delay == 0)
+            stats = self._td3_update_step(batch, do_actor_update)
+            self._update_count += 1
             ### END STUDENT SOLUTION  -  2.3 ###
             all_stats.append(stats)
         
@@ -146,16 +188,62 @@ class TD3Agent:
         
         # ---------------- Problem 2.1.2: TD3 target with policy smoothing ----------------
         ### BEGIN STUDENT SOLUTION - 2.1.2 ###
-       
+        # Critic predictions for current (s, a)
+        current_q1 = self.critic1(obs, actions)
+        current_q2 = self.critic2(obs, actions)
+
+        with torch.no_grad():
+            # Target policy smoothing
+            next_pi = self.target_actor(next_obs).mean_action
+            noise = (torch.randn_like(next_pi) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
+            next_a = next_pi + noise
+            # Clamp to action bounds
+            next_a = torch.max(torch.min(next_a, self.act_high), self.act_low)
+
+            # Double-Q target: min over two target critics
+            target_q1_next = self.target_critic1(next_obs, next_a)
+            target_q2_next = self.target_critic2(next_obs, next_a)
+            min_target_q_next = torch.min(target_q1_next, target_q2_next)
+
+            # Ensure reward/done are (B,1)
+            rewards_b = rewards.unsqueeze(-1) if rewards.dim() == 1 else rewards
+            dones_b   = dones.unsqueeze(-1)   if dones.dim()   == 1 else dones
+
+            # Bootstrapped TD target
+            target_q = rewards_b + self.gamma * (1.0 - dones_b) * min_target_q_next
+
         ### END STUDENT SOLUTION  -  2.1.2 ###
         
         # ---------------- Problem 2.1.3: Critic update ----------------
         ### BEGIN STUDENT SOLUTION - 2.1.3 ###
 
+        critic_loss = nn.functional.mse_loss(current_q1, target_q) + \
+              nn.functional.mse_loss(current_q2, target_q)
+
+        self.critic_opt.zero_grad(set_to_none=True)
+        critic_loss.backward()
+        self.critic_opt.step()
+
+
         ### END STUDENT SOLUTION  -  2.1.3 ###
         
         # ---------------- Problem 2.1.4: Actor update (delayed) ----------------
         ### BEGIN STUDENT SOLUTION - 2.1.4 ###
+        actor_loss = torch.tensor(0.0, device=self.device)
+        if do_actor_update:
+            # Maximize Q w.r.t. actor => minimize negative Q1
+            pred_actions = self.actor(obs).mean_action
+            actor_loss = -self.critic1(obs, pred_actions).mean()
+
+            self.actor_opt.zero_grad(set_to_none=True)
+            actor_loss.backward()
+            self.actor_opt.step()
+
+            # Soft-update all targets
+            self._soft_update(self.actor, self.target_actor)
+            self._soft_update(self.critic1, self.target_critic1)
+            self._soft_update(self.critic2, self.target_critic2)
+
        
         ### END STUDENT SOLUTION  -  2.1.4 ###
         
@@ -172,5 +260,11 @@ class TD3Agent:
         """Soft update target network parameters using Polyak averaging"""
         # ---------------- Problem 2.1.5: Polyak averaging ----------------
         ### BEGIN STUDENT SOLUTION - 2.1.5 ###
+
+        with torch.no_grad():
+            for lp, tp in zip(local_model.parameters(), target_model.parameters()):
+                tp.data.mul_(1.0 - self.tau)
+                tp.data.add_(self.tau * lp.data)
+
 
         ### END STUDENT SOLUTION  -  2.1.5 ###
