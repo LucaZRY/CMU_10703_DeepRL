@@ -169,8 +169,8 @@ class PPOAgent:
                 self.optimizer.step()
         ### EXPERIMENT 1.6 CODE ###
 
-        full_offpolicy = False
-        half_offpolicy = True
+        full_offpolicy = True
+        half_offpolicy = False
 
         batch = self._last_batch
         curr = {k: batch[k] for k in ("obs","actions","log_probs","advantages","returns")}

@@ -181,10 +181,10 @@ class TD3Agent:
         next_obs = batch["next_obs"]
         dones = batch["dones"]
         
-        current_q1 = torch.zeros_like((actions.shape[0],)) # placeholder
-        current_q2 = torch.zeros_like((actions.shape[0],)) # placeholder
-        target_q = torch.zeros_like((actions.shape[0],)) # placeholder
-        actor_loss = torch.tensor(0.0) # placeholder
+        # current_q1 = torch.zeros_like((actions.shape[0],)) # placeholder
+        # current_q2 = torch.zeros_like((actions.shape[0],)) # placeholder
+        # target_q = torch.zeros_like((actions.shape[0],)) # placeholder
+        # actor_loss = torch.tensor(0.0) # placeholder
         
         # ---------------- Problem 2.1.2: TD3 target with policy smoothing ----------------
         ### BEGIN STUDENT SOLUTION - 2.1.2 ###
