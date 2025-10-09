@@ -83,13 +83,10 @@ class PPOAgent:
             advantages = (advantages - adv_mean) / adv_std
 
             batch = self._prepare_batch(advantages, returns)
-            self._last_batch = batch  # used by _perform_update()
+            self._last_batch = batch 
 
         if self._steps_collected_with_curr_policy >= self.rollout_steps:
-            # Lines 11–12: optimize for K epochs (in _perform_update) and then advance policy
             ret = self._perform_update()
-
-            # Reset counters/rollout for the next policy iteration (θ_old ← θ)
             self._curr_policy_rollout = []
             self._steps_collected_with_curr_policy = 0
             self._policy_iteration += 1
@@ -132,85 +129,85 @@ class PPOAgent:
                 self.optimizer.step()
         ### EXPERIMENT 1.6 CODE ###
 
-        # full_offpolicy = True
-        # half_offpolicy = False
+        full_offpolicy = False
+        half_offpolicy = True
 
-        # batch = self._last_batch
-        # curr = {k: batch[k] for k in ("obs","actions","log_probs","advantages","returns")}
-        # N_curr = curr["obs"].shape[0]
+        batch = self._last_batch
+        curr = {k: batch[k] for k in ("obs","actions","log_probs","advantages","returns")}
+        N_curr = curr["obs"].shape[0]
 
-        # if not hasattr(self, "_ppo_replay"):
-        #     from collections import deque
-        #     self._ppo_replay = deque(maxlen=64)
+        if not hasattr(self, "_ppo_replay"):
+            from collections import deque
+            self._ppo_replay = deque(maxlen=64)
 
-        # self._ppo_replay.append({k: v.detach().clone() for k, v in curr.items()})
+        self._ppo_replay.append({k: v.detach().clone() for k, v in curr.items()})
 
-        # def _concat_batches(batches):
-        #     out = {}
-        #     for k in ("obs","actions","log_probs","advantages","returns"):
-        #         out[k] = torch.cat([b[k] for b in batches], dim=0)
-        #     return out
+        def _concat_batches(batches):
+            out = {}
+            for k in ("obs","actions","log_probs","advantages","returns"):
+                out[k] = torch.cat([b[k] for b in batches], dim=0)
+            return out
 
-        # big = _concat_batches(list(self._ppo_replay))  # ALL data so far (including current)
-        # N_big = big["obs"].shape[0]
+        big = _concat_batches(list(self._ppo_replay))  # ALL data so far (including current)
+        N_big = big["obs"].shape[0]
 
-        # # ---- Off-policy sampling variants ----
-        # for _ in range(self.update_epochs):
-        #     if full_offpolicy:
-        #         # ===== 1.6.1 FULL OFF-POLICY: sample only from BIG replay =====
-        #         perm = torch.randperm(N_big, device=self.device)
-        #         for start in range(0, N_big, self.minibatch_size):
-        #             idx = perm[start:start + self.minibatch_size]
-        #             mb = {k: big[k][idx] for k in curr.keys()}
-        #             self.optimizer.zero_grad(set_to_none=True)
-        #             loss, stats = self._ppo_loss(mb)
-        #             all_stats.append(stats)
-        #             loss.backward()
-        #             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-        #             self.optimizer.step()
+        # ---- Off-policy sampling variants ----
+        for _ in range(self.update_epochs):
+            if full_offpolicy:
+                # ===== 1.6.1 FULL OFF-POLICY: sample only from BIG replay =====
+                perm = torch.randperm(N_big, device=self.device)
+                for start in range(0, N_big, self.minibatch_size):
+                    idx = perm[start:start + self.minibatch_size]
+                    mb = {k: big[k][idx] for k in curr.keys()}
+                    self.optimizer.zero_grad(set_to_none=True)
+                    loss, stats = self._ppo_loss(mb)
+                    all_stats.append(stats)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+                    self.optimizer.step()
 
-        #     elif half_offpolicy:
-        #         # ===== 1.6.2 HALF OFF-POLICY: half from CURRENT, half from BIG =====
-        #         half = self.minibatch_size // 2
-        #         perm_curr = torch.randperm(N_curr, device=self.device)
-        #         perm_big  = torch.randperm(N_big,  device=self.device)
+            elif half_offpolicy:
+                # ===== 1.6.2 HALF OFF-POLICY: half from CURRENT, half from BIG =====
+                half = self.minibatch_size // 2
+                perm_curr = torch.randperm(N_curr, device=self.device)
+                perm_big  = torch.randperm(N_big,  device=self.device)
 
-        #         max_iter = max(
-        #             (N_curr + half - 1) // half,
-        #             (N_big  + half - 1) // half
-        #         )
-        #         for it in range(max_iter):
-        #             i1 = perm_curr[it*half:(it+1)*half]
-        #             i2 = perm_big[it*half:(it+1)*half]
+                max_iter = max(
+                    (N_curr + half - 1) // half,
+                    (N_big  + half - 1) // half
+                )
+                for it in range(max_iter):
+                    i1 = perm_curr[it*half:(it+1)*half]
+                    i2 = perm_big[it*half:(it+1)*half]
 
-        #             # top-up if one pool runs short so batch size stays constant
-        #             if i1.numel() < half:
-        #                 i1 = torch.cat([i1, torch.randint(0, N_curr, (half - i1.numel(),), device=self.device)], dim=0)
-        #             if i2.numel() < half:
-        #                 i2 = torch.cat([i2, torch.randint(0, N_big,  (half - i2.numel(),), device=self.device)], dim=0)
+                    # top-up if one pool runs short so batch size stays constant
+                    if i1.numel() < half:
+                        i1 = torch.cat([i1, torch.randint(0, N_curr, (half - i1.numel(),), device=self.device)], dim=0)
+                    if i2.numel() < half:
+                        i2 = torch.cat([i2, torch.randint(0, N_big,  (half - i2.numel(),), device=self.device)], dim=0)
 
-        #             mb = {}
-        #             for k in curr.keys():
-        #                 mb[k] = torch.cat([curr[k][i1], big[k][i2]], dim=0)
+                    mb = {}
+                    for k in curr.keys():
+                        mb[k] = torch.cat([curr[k][i1], big[k][i2]], dim=0)
 
-        #             self.optimizer.zero_grad(set_to_none=True)
-        #             loss, stats = self._ppo_loss(mb)
-        #             all_stats.append(stats)
-        #             loss.backward()
-        #             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-        #             self.optimizer.step()
-        #     else:
-        #         # ===== On-policy fallback (current rollout only) =====
-        #         perm = torch.randperm(N_curr, device=self.device)
-        #         for start in range(0, N_curr, self.minibatch_size):
-        #             idx = perm[start:start + self.minibatch_size]
-        #             mb = {k: curr[k][idx] for k in curr.keys()}
-        #             self.optimizer.zero_grad(set_to_none=True)
-        #             loss, stats = self._ppo_loss(mb)
-        #             all_stats.append(stats)
-        #             loss.backward()
-        #             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-        #             self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
+                    loss, stats = self._ppo_loss(mb)
+                    all_stats.append(stats)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+                    self.optimizer.step()
+            else:
+                # ===== On-policy fallback (current rollout only) =====
+                perm = torch.randperm(N_curr, device=self.device)
+                for start in range(0, N_curr, self.minibatch_size):
+                    idx = perm[start:start + self.minibatch_size]
+                    mb = {k: curr[k][idx] for k in curr.keys()}
+                    self.optimizer.zero_grad(set_to_none=True)
+                    loss, stats = self._ppo_loss(mb)
+                    all_stats.append(stats)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+                    self.optimizer.step()
 
         ### EXPERIMENT 1.6 CODE END ###
     
@@ -219,15 +216,13 @@ class PPOAgent:
         # ---------------- Problem 1.4.2: KL Divergence Beta Update ----------------
         ### BEGIN STUDENT SOLUTION - 1.4.2 ###
 
-    #    if all_stats:
-    #         avg_kl = float(np.mean([s["kl"] for s in all_stats]))
-    #         # Increase β if KL too large; decrease if too small
-    #         if avg_kl > 2.0 * self.target_kl:
-    #             self.beta *= 1.5
-    #         elif avg_kl < 0.5 * self.target_kl:
-    #             self.beta /= 1.5
-    #         # keep β in a sensible range
-    #         self.beta = float(np.clip(self.beta, 1e-8, 10.0))
+        # if all_stats:
+        #     avg_kl = float(np.mean([s["kl"] for s in all_stats]))
+        #     if avg_kl > 2.0 * self.target_kl:
+        #         self.beta *= 1.5
+        #     elif avg_kl < 0.5 * self.target_kl:
+        #         self.beta /= 1.5
+        #     self.beta = float(np.clip(self.beta, 1e-8, 10.0))
  
         ### END STUDENT SOLUTION - 1.4.2 ###
         
@@ -254,13 +249,11 @@ class PPOAgent:
 
         # ---------------- Problem 1.2: Compute GAE ----------------
         ### BEGIN STUDENT SOLUTION - 1.2 ###
-        # values_ext = np.append(values, final_v).astype(np.float32)
         values_ext = np.append(values.astype(np.float32), np.float32(final_v))
-        
         advantages = np.zeros(T, dtype=np.float32)
         lastgaelam = 0.0
         for t in reversed(range(T)):
-            nonterminal = 1.0 - float(dones[t])  # 0 if done at t, else 1
+            nonterminal = 1.0 - float(dones[t])  
             delta = rewards[t] + self.gamma * values_ext[t + 1] * nonterminal - values_ext[t]
             lastgaelam = delta + self.gamma * self.gae_lambda * nonterminal * lastgaelam
             advantages[t] = lastgaelam
