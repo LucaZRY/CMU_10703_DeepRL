@@ -431,7 +431,7 @@ if __name__ == "__main__":
                    help="Total environment steps")
     p.add_argument("--cpu", action="store_true",
                    help="Force CPU usage")
-    p.add_argument("--seed", type=int, default=42000,
+    p.add_argument("--seed", type=int, default=42,
                    help="Random seed")
     
     # Common hyperparameters

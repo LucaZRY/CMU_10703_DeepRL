@@ -66,6 +66,8 @@ class TD3Agent:
         self.target_actor.load_state_dict(self.actor.state_dict())
         self.target_critic1.load_state_dict(self.critic1.state_dict())
         self.target_critic2.load_state_dict(self.critic2.state_dict())
+
+        # self.policy_delay = max(2, self.policy_delay)
         ### END STUDENT SOLUTION  -  2.1.1 ###
         
         # Optimizers
@@ -192,6 +194,12 @@ class TD3Agent:
         current_q1 = self.critic1(obs, actions)
         current_q2 = self.critic2(obs, actions)
 
+        # --- Normalize shapes to (B,1) to avoid broadcasting to (B,B) ---
+        if current_q1.dim() == 1:
+            current_q1 = current_q1.unsqueeze(-1)
+        if current_q2.dim() == 1:
+            current_q2 = current_q2.unsqueeze(-1)
+
         with torch.no_grad():
             # Target policy smoothing
             next_pi = self.target_actor(next_obs).mean_action
@@ -203,14 +211,22 @@ class TD3Agent:
             # Double-Q target: min over two target critics
             target_q1_next = self.target_critic1(next_obs, next_a)
             target_q2_next = self.target_critic2(next_obs, next_a)
+
+            # --- Normalize target Q shapes to (B,1) ---
+            if target_q1_next.dim() == 1:
+                target_q1_next = target_q1_next.unsqueeze(-1)
+            if target_q2_next.dim() == 1:
+                target_q2_next = target_q2_next.unsqueeze(-1)
+
             min_target_q_next = torch.min(target_q1_next, target_q2_next)
 
             # Ensure reward/done are (B,1)
             rewards_b = rewards.unsqueeze(-1) if rewards.dim() == 1 else rewards
             dones_b   = dones.unsqueeze(-1)   if dones.dim()   == 1 else dones
 
-            # Bootstrapped TD target
+            # Bootstrapped TD target (B,1)
             target_q = rewards_b + self.gamma * (1.0 - dones_b) * min_target_q_next
+
 
         ### END STUDENT SOLUTION  -  2.1.2 ###
         
@@ -224,14 +240,12 @@ class TD3Agent:
         critic_loss.backward()
         self.critic_opt.step()
 
-
         ### END STUDENT SOLUTION  -  2.1.3 ###
         
         # ---------------- Problem 2.1.4: Actor update (delayed) ----------------
         ### BEGIN STUDENT SOLUTION - 2.1.4 ###
         actor_loss = torch.tensor(0.0, device=self.device)
         if do_actor_update:
-            # Maximize Q w.r.t. actor => minimize negative Q1
             pred_actions = self.actor(obs).mean_action
             actor_loss = -self.critic1(obs, pred_actions).mean()
 
@@ -239,12 +253,10 @@ class TD3Agent:
             actor_loss.backward()
             self.actor_opt.step()
 
-            # Soft-update all targets
             self._soft_update(self.actor, self.target_actor)
             self._soft_update(self.critic1, self.target_critic1)
             self._soft_update(self.critic2, self.target_critic2)
 
-       
         ### END STUDENT SOLUTION  -  2.1.4 ###
         
         # Return stats in format expected by runner
