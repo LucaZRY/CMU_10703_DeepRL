@@ -107,43 +107,6 @@ class PPOAgent:
         
         # ---------------- Problem 1.3.2: PPO Update ----------------
         ### BEGIN STUDENT SOLUTION - 1.3.2 ###
-        # assert hasattr(self, "_last_batch"), "No batch prepared. Call step() until an update is triggered first."
-        # batch = self._last_batch
-
-        # N = batch["obs"].shape[0]
-        # for _ in range(self.update_epochs):
-        #     # shuffle indices each epoch
-        #     perm = torch.randperm(N, device=self.device)
-        #     for start in range(0, N, self.minibatch_size):
-        #         idx = perm[start:start + self.minibatch_size]
-
-        #         # slice a minibatch
-        #         minibatch = {
-        #             "obs": batch["obs"][idx],
-        #             "actions": batch["actions"][idx],
-        #             "log_probs": batch["log_probs"][idx],
-        #             "advantages": batch["advantages"][idx],
-        #             "returns": batch["returns"][idx],
-        #         }
-
-        #         # compute loss and take an optimizer step
-        #         self.optimizer.zero_grad()
-        #         loss, stats = self._ppo_loss(minibatch)
-        #         all_stats.append(stats)
-
-        #         loss.backward()
-        #         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-        #         self.optimizer.step()
-
-        if not hasattr(self, "_device_wrap_applied"):
-            orig_forward = self.actor.forward
-            def _wrapped_forward(obs):
-                dev = next(self.actor.parameters()).device
-                return orig_forward(obs.to(dev))
-            self.actor.forward = _wrapped_forward  # monkey-patch
-            self._device_wrap_applied = True
-
-        # Train on the most recent rollout for multiple epochs with shuffled minibatches
         assert hasattr(self, "_last_batch"), "No prepared batch. Collect a rollout first."
         batch = self._last_batch
         N = batch["obs"].shape[0]
@@ -169,85 +132,85 @@ class PPOAgent:
                 self.optimizer.step()
         ### EXPERIMENT 1.6 CODE ###
 
-        full_offpolicy = True
-        half_offpolicy = False
+        # full_offpolicy = True
+        # half_offpolicy = False
 
-        batch = self._last_batch
-        curr = {k: batch[k] for k in ("obs","actions","log_probs","advantages","returns")}
-        N_curr = curr["obs"].shape[0]
+        # batch = self._last_batch
+        # curr = {k: batch[k] for k in ("obs","actions","log_probs","advantages","returns")}
+        # N_curr = curr["obs"].shape[0]
 
-        if not hasattr(self, "_ppo_replay"):
-            from collections import deque
-            self._ppo_replay = deque(maxlen=64)
+        # if not hasattr(self, "_ppo_replay"):
+        #     from collections import deque
+        #     self._ppo_replay = deque(maxlen=64)
 
-        self._ppo_replay.append({k: v.detach().clone() for k, v in curr.items()})
+        # self._ppo_replay.append({k: v.detach().clone() for k, v in curr.items()})
 
-        def _concat_batches(batches):
-            out = {}
-            for k in ("obs","actions","log_probs","advantages","returns"):
-                out[k] = torch.cat([b[k] for b in batches], dim=0)
-            return out
+        # def _concat_batches(batches):
+        #     out = {}
+        #     for k in ("obs","actions","log_probs","advantages","returns"):
+        #         out[k] = torch.cat([b[k] for b in batches], dim=0)
+        #     return out
 
-        big = _concat_batches(list(self._ppo_replay))  # ALL data so far (including current)
-        N_big = big["obs"].shape[0]
+        # big = _concat_batches(list(self._ppo_replay))  # ALL data so far (including current)
+        # N_big = big["obs"].shape[0]
 
-        # ---- Off-policy sampling variants ----
-        for _ in range(self.update_epochs):
-            if full_offpolicy:
-                # ===== 1.6.1 FULL OFF-POLICY: sample only from BIG replay =====
-                perm = torch.randperm(N_big, device=self.device)
-                for start in range(0, N_big, self.minibatch_size):
-                    idx = perm[start:start + self.minibatch_size]
-                    mb = {k: big[k][idx] for k in curr.keys()}
-                    self.optimizer.zero_grad(set_to_none=True)
-                    loss, stats = self._ppo_loss(mb)
-                    all_stats.append(stats)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-                    self.optimizer.step()
+        # # ---- Off-policy sampling variants ----
+        # for _ in range(self.update_epochs):
+        #     if full_offpolicy:
+        #         # ===== 1.6.1 FULL OFF-POLICY: sample only from BIG replay =====
+        #         perm = torch.randperm(N_big, device=self.device)
+        #         for start in range(0, N_big, self.minibatch_size):
+        #             idx = perm[start:start + self.minibatch_size]
+        #             mb = {k: big[k][idx] for k in curr.keys()}
+        #             self.optimizer.zero_grad(set_to_none=True)
+        #             loss, stats = self._ppo_loss(mb)
+        #             all_stats.append(stats)
+        #             loss.backward()
+        #             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+        #             self.optimizer.step()
 
-            elif half_offpolicy:
-                # ===== 1.6.2 HALF OFF-POLICY: half from CURRENT, half from BIG =====
-                half = self.minibatch_size // 2
-                perm_curr = torch.randperm(N_curr, device=self.device)
-                perm_big  = torch.randperm(N_big,  device=self.device)
+        #     elif half_offpolicy:
+        #         # ===== 1.6.2 HALF OFF-POLICY: half from CURRENT, half from BIG =====
+        #         half = self.minibatch_size // 2
+        #         perm_curr = torch.randperm(N_curr, device=self.device)
+        #         perm_big  = torch.randperm(N_big,  device=self.device)
 
-                max_iter = max(
-                    (N_curr + half - 1) // half,
-                    (N_big  + half - 1) // half
-                )
-                for it in range(max_iter):
-                    i1 = perm_curr[it*half:(it+1)*half]
-                    i2 = perm_big[it*half:(it+1)*half]
+        #         max_iter = max(
+        #             (N_curr + half - 1) // half,
+        #             (N_big  + half - 1) // half
+        #         )
+        #         for it in range(max_iter):
+        #             i1 = perm_curr[it*half:(it+1)*half]
+        #             i2 = perm_big[it*half:(it+1)*half]
 
-                    # top-up if one pool runs short so batch size stays constant
-                    if i1.numel() < half:
-                        i1 = torch.cat([i1, torch.randint(0, N_curr, (half - i1.numel(),), device=self.device)], dim=0)
-                    if i2.numel() < half:
-                        i2 = torch.cat([i2, torch.randint(0, N_big,  (half - i2.numel(),), device=self.device)], dim=0)
+        #             # top-up if one pool runs short so batch size stays constant
+        #             if i1.numel() < half:
+        #                 i1 = torch.cat([i1, torch.randint(0, N_curr, (half - i1.numel(),), device=self.device)], dim=0)
+        #             if i2.numel() < half:
+        #                 i2 = torch.cat([i2, torch.randint(0, N_big,  (half - i2.numel(),), device=self.device)], dim=0)
 
-                    mb = {}
-                    for k in curr.keys():
-                        mb[k] = torch.cat([curr[k][i1], big[k][i2]], dim=0)
+        #             mb = {}
+        #             for k in curr.keys():
+        #                 mb[k] = torch.cat([curr[k][i1], big[k][i2]], dim=0)
 
-                    self.optimizer.zero_grad(set_to_none=True)
-                    loss, stats = self._ppo_loss(mb)
-                    all_stats.append(stats)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-                    self.optimizer.step()
-            else:
-                # ===== On-policy fallback (current rollout only) =====
-                perm = torch.randperm(N_curr, device=self.device)
-                for start in range(0, N_curr, self.minibatch_size):
-                    idx = perm[start:start + self.minibatch_size]
-                    mb = {k: curr[k][idx] for k in curr.keys()}
-                    self.optimizer.zero_grad(set_to_none=True)
-                    loss, stats = self._ppo_loss(mb)
-                    all_stats.append(stats)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
-                    self.optimizer.step()
+        #             self.optimizer.zero_grad(set_to_none=True)
+        #             loss, stats = self._ppo_loss(mb)
+        #             all_stats.append(stats)
+        #             loss.backward()
+        #             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+        #             self.optimizer.step()
+        #     else:
+        #         # ===== On-policy fallback (current rollout only) =====
+        #         perm = torch.randperm(N_curr, device=self.device)
+        #         for start in range(0, N_curr, self.minibatch_size):
+        #             idx = perm[start:start + self.minibatch_size]
+        #             mb = {k: curr[k][idx] for k in curr.keys()}
+        #             self.optimizer.zero_grad(set_to_none=True)
+        #             loss, stats = self._ppo_loss(mb)
+        #             all_stats.append(stats)
+        #             loss.backward()
+        #             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+        #             self.optimizer.step()
 
         ### EXPERIMENT 1.6 CODE END ###
     
