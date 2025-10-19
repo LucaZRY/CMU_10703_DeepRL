@@ -129,6 +129,44 @@ class TrainDiffusionPolicy:
         """
         # BEGIN STUDENT SOLUTION
 
+        self.model.eval()
+
+        B = previous_states.shape[0]
+        act_dim = self.action_dimension
+
+        # Start from pure Gaussian noise for the future actions we want to predict
+        xt = torch.randn(B, max_action_len, act_dim, device=self.device)
+
+        # Inference timesteps come in decreasing order (T, …, 1)
+        timesteps = self.get_inference_timesteps()  # tensor on self.device
+
+        with torch.no_grad():
+            for t in timesteps:
+                # (B, 1) noise-level “time” input expected by the model
+                t_in = torch.full((B, 1), int(t.item()), device=self.device, dtype=torch.long)
+
+                # ε_θ(prev_states, prev_actions, xt, episode_timesteps, t)
+                pred_eps = self.model(
+                    previous_states=previous_states,                          # (B, k_s, state_dim)
+                    previous_actions=previous_actions,                        # (B, k_a, act_dim)
+                    noisy_actions=xt,                                         # (B, k',  act_dim)
+                    episode_timesteps=episode_timesteps,                      # (B, k_s)
+                    noise_timesteps=t_in,                                     # (B, 1)
+                    previous_states_mask=previous_states_padding_mask,        # (B, k_s)  True = pad
+                    previous_actions_mask=previous_actions_padding_mask,      # (B, k_a)  True = pad
+                    actions_padding_mask=actions_padding_mask,                # (B, k')   True = pad
+                )
+
+                # One reverse-diffusion step: x_{t-1} ← scheduler.step(ε̂, t, x_t)
+                step_out = self.inference_scheduler.step(
+                    model_output=pred_eps,
+                    timestep=t,
+                    sample=xt,
+                )
+                xt = step_out.prev_sample  # becomes x_{t-1}
+
+        # After the loop, xt is x_0 (denoised, *normalized* actions)
+        predicted_actions = xt
         # END STUDENT SOLUTION
         return predicted_actions
 
@@ -157,9 +195,94 @@ class TrainDiffusionPolicy:
         """
         rewards, rgbs = np.zeros((self.max_trajectory_length,)), []
         # BEGIN STUDENT SOLUTION
+        self.model.eval()
+        rewards[:] = 0.0
+        rgbs = []
 
+        state_dim = self.state_dimension
+        act_dim = self.action_dimension
+
+        # Keep recent context (lists); we’ll pad on the RIGHT (end) to match the model’s expectation
+        prev_states_buf, prev_actions_buf = [], []
+
+        obs, _ = env.reset()
+        if render:
+            rgbs.append(env.render())
+
+        with torch.no_grad():
+            t_env = 0
+            done = False
+            truncated = False
+
+            while (not done) and (not truncated) and (t_env < self.max_trajectory_length):
+
+                # Build conditioning windows
+                ps = prev_states_buf[-num_previous_states:]
+                pa = prev_actions_buf[-num_previous_actions:]
+
+                # Normalize and pad previous states
+                ps_norm = [(np.array(s, dtype=np.float32) - self.states_mean) / self.states_std for s in ps]
+                pad_ps = num_previous_states - len(ps_norm)
+                if pad_ps > 0:
+                    ps_norm = ps_norm + [np.zeros(state_dim, dtype=np.float32)] * pad_ps
+                ps_mask = [False] * (num_previous_states - pad_ps) + [True] * pad_ps  # False=keep, True=pad
+
+                # Normalize and pad previous actions
+                pa_norm = [(np.array(a, dtype=np.float32) - self.actions_mean) / self.actions_std for a in pa]
+                pad_pa = num_previous_actions - len(pa_norm)
+                if pad_pa > 0:
+                    pa_norm = pa_norm + [np.zeros(act_dim, dtype=np.float32)] * pad_pa
+                pa_mask = [False] * (num_previous_actions - pad_pa) + [True] * pad_pa
+
+                # Episode timesteps matching previous_states length
+                epi_ts = np.arange(max(1, num_previous_states), dtype=np.int64)  # simple positional steps
+                epi_ts = epi_ts - 1  # start at 0
+
+                # Make tensors (batch=1)
+                prev_states_t = torch.tensor(ps_norm, dtype=torch.float32, device=self.device).unsqueeze(0)          # (1, k_s, state_dim)
+                prev_actions_t = torch.tensor(pa_norm, dtype=torch.float32, device=self.device).unsqueeze(0)        # (1, k_a, act_dim)
+                ep_ts_t = torch.tensor(epi_ts, dtype=torch.long, device=self.device).unsqueeze(0)                    # (1, k_s)
+
+                ps_mask_t = torch.tensor(ps_mask, dtype=torch.bool, device=self.device).unsqueeze(0)                 # (1, k_s)
+                pa_mask_t = torch.tensor(pa_mask, dtype=torch.bool, device=self.device).unsqueeze(0)                 # (1, k_a)
+                act_mask_t = torch.zeros((1, num_actions_to_eval_in_a_row), dtype=torch.bool, device=self.device)    # predict all steps
+
+                # Sample k future actions (normalized)
+                pred_norm_actions = self.diffusion_sample(
+                    previous_states=prev_states_t,
+                    previous_actions=prev_actions_t,
+                    episode_timesteps=ep_ts_t,
+                    previous_states_padding_mask=ps_mask_t,
+                    previous_actions_padding_mask=pa_mask_t,
+                    actions_padding_mask=act_mask_t,
+                    max_action_len=num_actions_to_eval_in_a_row,
+                )[0].cpu().numpy()  # (k, act_dim)
+
+                # Denormalize and clip
+                pred_actions = pred_norm_actions * self.actions_std + self.actions_mean
+                pred_actions = np.clip(pred_actions, -self.clip_sample_range, self.clip_sample_range)
+
+                # Execute up to k actions (stop early if episode ends)
+                for i in range(num_actions_to_eval_in_a_row):
+                    a = pred_actions[i]
+                    next_obs, r, done, truncated, _ = env.step(a)
+
+                    # log
+                    rewards[t_env] = r
+                    if render:
+                        rgbs.append(env.render())
+
+                    # update buffers (store raw obs/action; they’ll be normalized next iter)
+                    prev_states_buf.append(obs)
+                    prev_actions_buf.append(a)
+
+                    t_env += 1
+                    obs = next_obs
+
+                    if done or truncated or (t_env >= self.max_trajectory_length):
+                        break
         # END STUDENT SOLUTION
-        return rewards,
+        return rewards, rgbs
 
     def evaluation(
         self,
@@ -267,7 +390,63 @@ class TrainDiffusionPolicy:
         NOTE: return a loss value that is a plain float (not a tensor), and is on cpu
         """
         # BEGIN STUDENT SOLUTION
+        self.model.train()
 
+        # Get a batch: previous states/actions, clean future actions (k′), episode timesteps,
+        # and the three padding masks (see get_training_batch provided in this file).
+        (
+            prev_states,           # (B, k, state_dim)
+            prev_actions,          # (B, k-1, act_dim)
+            clean_future_actions,  # (B, k', act_dim)
+            episode_timesteps,     # (B, k)
+            ps_mask,               # (B, k)      False=keep, True=pad
+            pa_mask,               # (B, k-1)    False=keep, True=pad
+            act_mask               # (B, k')     False=keep, True=pad   (all False in training typically)
+        ) = self.get_training_batch(batch_size=batch_size)
+
+        B, Kp, act_dim = clean_future_actions.shape  # Kp = k'
+
+        # Move to device
+        prev_states = prev_states.to(self.device)
+        prev_actions = prev_actions.to(self.device)
+        clean_future_actions = clean_future_actions.to(self.device)
+        episode_timesteps = episode_timesteps.to(self.device).long()
+        ps_mask = ps_mask.to(self.device)
+        a_mask = pa_mask.to(self.device)
+        act_mask = act_mask.to(self.device)
+
+        # Sample noise and a diffusion timestep per element
+        eps = torch.randn_like(clean_future_actions)                     # ϵ ~ N(0, I)
+        t = torch.randint(
+            low=1, high=self.num_train_diffusion_timesteps, size=(B,), device=self.device
+        ).long()                                                         # one t per item
+
+        # Add noise to clean actions using the TRAINING scheduler (DDPM)
+        noisy_actions = self.training_scheduler.add_noise(
+            clean_future_actions, noise=eps, timesteps=t
+        )                                                                # (B, k', act_dim)
+
+        # Predict noise with the model
+        pred_eps = self.model(
+            previous_states=prev_states,
+            previous_actions=prev_actions,
+            noisy_actions=noisy_actions,
+            episode_timesteps=episode_timesteps,
+            noise_timesteps=t.unsqueeze(1),           # (B,1) as expected by the transformer
+            previous_states_mask=ps_mask,
+            previous_actions_mask=pa_mask,
+            actions_padding_mask=act_mask,
+        )
+
+        # MSE(ϵθ(·), ϵ)
+        loss = torch.nn.MSELoss()(pred_eps, eps)
+
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.optimizer.step()
+
+        return float(loss.item())
         # END STUDENT SOLUTION
 
         return loss
@@ -373,7 +552,63 @@ def run_training():
     with open(f"data/actions_BC.pkl", "rb") as f:
         actions = pickle.load(f)
     # BEGIN STUDENT SOLUTION
-    trainer = TrainDiffusionPolicy(...)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    env = gym.make("BipedalWalker-v3", render_mode="rgb_array")
+
+    # Load expert dataset (states/actions) per the handout
+    with open("data/states_BC.pkl", "rb") as f:
+        states = pickle.load(f)
+    with open("data/actions_BC.pkl", "rb") as f:
+        actions = pickle.load(f)
+
+    # Build diffusion transformer policy
+    model = PolicyDiffusionTransformer(
+        state_dim=states.shape[-1],
+        act_dim=actions.shape[-1],
+        num_transformer_layers=6,
+        hidden_size=128,
+        n_transformer_heads=1,
+        target="diffusion_policy",
+        device=device,
+    )
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5, weight_decay=1e-3)
+
+    # Wrap in trainer (this class normalizes states/actions internally)
+    trainer = TrainDiffusionPolicy(
+        env=env,
+        model=model,
+        optimizer=optimizer,
+        states_array=states,
+        actions_array=actions,
+        device=device,
+        num_train_diffusion_timesteps=30,  # per spec
+        max_trajectory_length=1600,
+    )
+
+    # Train for 50k steps with batch=256, save at end
+    losses = []
+    num_steps = 50_000
+    batch_size = 256
+    t0 = time.time()
+
+    for step in range(1, num_steps + 1):
+        loss = trainer.training_step(batch_size=batch_size)
+        losses.append(loss)
+
+        if step % 1000 == 0:
+            print(f"[Diffusion] step {step}/{num_steps} | loss {loss:.4f}")
+
+    # Save model + loss plot
+    torch.save(model.state_dict(), "diffusion_policy.pt")
+    plt.figure()
+    plt.plot(losses)
+    plt.title("Diffusion Policy Training Loss")
+    plt.xlabel("Step"); plt.ylabel("MSE to noise")
+    plt.grid(True)
+    plt.savefig("diffusion_training_loss.png")
+
+    print(f"Finished 50k steps in {time.time()-t0:.1f}s; final loss={losses[-1]:.4f}")
     # END STUDENT SOLUTION
     trainer.evaluation(num_samples=30)
     traj_reward = 0

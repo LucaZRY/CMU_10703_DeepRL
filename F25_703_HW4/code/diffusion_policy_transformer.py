@@ -150,6 +150,7 @@ class PolicyDiffusionTransformer(nn.Module):
         previous_observations = torch.cat((previous_states_embeddings, previous_actions_embeddings), dim=1)
 
         # concatenate noise timestep embeddings to previous observations
+        noise_timestep_embeddings = noise_timestep_embeddings.unsqueeze(1)
         previous_observations = torch.cat((noise_timestep_embeddings, previous_observations), dim=1)
 
         # get previous observations sequence length
