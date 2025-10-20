@@ -147,17 +147,21 @@ class TrainDaggerBC:
         A_new = np.concatenate(new_A, axis=0) if new_A else np.empty((0, self.env.action_space.shape[0]), np.float32)
         T_new = np.concatenate(new_T, axis=0) if new_T else np.empty((0,), np.int64)
 
-        if hasattr(self, "clip_sample_range") and self.clip_sample_range is not None:
-            A_new = np.clip(A_new, -self.clip_sample_range, self.clip_sample_range)
+        # keep dataset actions tame
+        A_new = np.clip(A_new, -1.0, 1.0)
 
         if getattr(self, "states", None) is None:
-            self.states = S_new
-            self.actions = A_new
-            self.timesteps = T_new
+            self.states, self.actions, self.timesteps = S_new, A_new, T_new
         else:
             self.states = np.concatenate([self.states, S_new], axis=0)
             self.actions = np.concatenate([self.actions, A_new], axis=0)
             self.timesteps = np.concatenate([self.timesteps, T_new], axis=0)
+
+        # cap dataset size to avoid overweighting rare, tough states
+        MAX_DS = 200_000
+        if len(self.states) > MAX_DS:
+            idx = np.random.choice(len(self.states), MAX_DS, replace=False)
+            self.states, self.actions, self.timesteps = self.states[idx], self.actions[idx], self.timesteps[idx]    
 
         # END STUDENT SOLUTION
 
@@ -322,8 +326,6 @@ def run_training(dagger: bool):
         model_weights = torch.load(f"data/models/super_expert_PPO_model.pt", map_location=device_str)
         expert_model.load_state_dict(model_weights["PolicyNet"])
         # BEGIN STUDENT SOLUTION
-
-    
 
         model_Dagger = SimpleNet(
             state_dim=env.observation_space.shape[0],

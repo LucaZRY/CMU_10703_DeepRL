@@ -143,7 +143,7 @@ class TrainDiffusionPolicy:
         with torch.no_grad():
             for t in timesteps:
                 # (B, 1) noise-level “time” input expected by the model
-                t_in = torch.full((B, 1), int(t.item()), device=self.device, dtype=torch.long)
+                t_in = torch.full((B, ), int(t.item()), device=self.device, dtype=torch.long)
 
                 # ε_θ(prev_states, prev_actions, xt, episode_timesteps, t)
                 pred_eps = self.model(
@@ -432,7 +432,7 @@ class TrainDiffusionPolicy:
             previous_actions=prev_actions,
             noisy_actions=noisy_actions,
             episode_timesteps=episode_timesteps,
-            noise_timesteps=t.unsqueeze(1),           # (B,1) as expected by the transformer
+            noise_timesteps=t,           # (B,1) as expected by the transformer
             previous_states_mask=ps_mask,
             previous_actions_mask=pa_mask,
             actions_padding_mask=act_mask,
