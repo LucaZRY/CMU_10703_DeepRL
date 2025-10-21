@@ -1,0 +1,14 @@
+name: 703hw5
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - opencv
+  - pybox2d=2.3.10
+  - gym
+  - scipy
+  - matplotlib
+  - pip
+  - pip:
+    - torch
