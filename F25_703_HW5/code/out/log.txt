@@ -1,0 +1,2 @@
+2025-10-21 17:47:22 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-21 17:47:22 run.py     INFO    : Test episode 0

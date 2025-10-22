@@ -66,6 +66,10 @@ class PENN(nn.Module):
 
     def get_loss(self, targ, mean, logvar):
         # TODO: write your code here
+        inv_var = torch.exp(-logvar)
+        mse = (mean - targ) ** 2
+        loss = torch.mean(torch.sum(0.5 * (logvar + mse * inv_var), dim=1))
+        return loss
 
         raise NotImplementedError
 
@@ -98,4 +102,32 @@ class PENN(nn.Module):
         """
         # TODO: write your code here
 
-        raise NotImplementedError
+        inputs_t  = inputs if torch.is_tensor(inputs)  else torch.tensor(inputs,  dtype=torch.float, device=self.device)
+        targets_t = targets if torch.is_tensor(targets) else torch.tensor(targets, dtype=torch.float, device=self.device)
+
+        N = inputs_t.shape[0]
+        avg_losses = []
+
+        for _ in range(num_train_itrs):
+            losses_this_itr = []
+
+            for net in self.networks:
+                # Sample with replacement for bootstrap-style training
+                idx = np.random.choice(N, size=batch_size, replace=True)
+                batch_inp  = inputs_t[idx]
+                batch_targ = targets_t[idx]
+
+                mean, logvar = self.get_output(net(batch_inp))
+                loss = self.get_loss(batch_targ, mean, logvar)
+
+                self.opt.zero_grad()
+                loss.backward()
+                self.opt.step()
+
+                losses_this_itr.append(loss.item())
+
+            avg_losses.append(float(np.mean(losses_this_itr)))
+
+        return avg_losses
+
+        # raise NotImplementedError
