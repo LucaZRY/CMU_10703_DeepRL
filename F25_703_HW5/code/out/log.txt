@@ -1,2 +1,22 @@
 2025-10-21 17:47:22 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
 2025-10-21 17:47:22 run.py     INFO    : Test episode 0
+2025-10-22 16:18:10 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 16:18:10 run.py     INFO    : Test episode 0
+2025-10-22 16:46:22 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 16:46:22 run.py     INFO    : Test episode 0
+2025-10-22 16:46:33 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 16:46:33 run.py     INFO    : Test episode 0
+2025-10-22 16:54:32 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 16:54:32 run.py     INFO    : Test episode 0
+2025-10-22 16:55:35 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 16:55:35 run.py     INFO    : Test episode 0
+2025-10-22 16:56:53 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 16:56:53 run.py     INFO    : Test episode 0
+2025-10-22 18:13:32 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 18:13:32 run.py     INFO    : Test episode 0
+2025-10-22 18:17:02 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 18:17:02 run.py     INFO    : Test episode 0
+2025-10-22 18:17:16 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 18:17:16 run.py     INFO    : Test episode 0
+2025-10-22 18:25:16 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-22 18:25:16 run.py     INFO    : Test episode 0
