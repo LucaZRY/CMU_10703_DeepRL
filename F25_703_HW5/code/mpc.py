@@ -242,14 +242,7 @@ class MPC:
             if a.size != self.action_dim:
                 a = a.flatten()[: self.action_dim]
             a0, a1 = float(a[0]), float(a[1])
-
-            # (Optional) clip to env bounds if available
-            # if hasattr(self.env, "action_space"):
-            #     low, high = self.env.action_space.low, self.env.action_space.high
-            #     a0 = float(np.clip(a0, low[0], high[0]))
-            #     a1 = float(np.clip(a1, low[1], high[1]))
-
-            # put simulator at state s BEFORE stepping
+          
             if hasattr(self.env, "set_state"):
                 try:
                     self.env.set_state(s.tolist())  # common signature
