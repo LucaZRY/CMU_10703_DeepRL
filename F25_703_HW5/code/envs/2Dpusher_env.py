@@ -5,6 +5,7 @@ import Box2D
 from Box2D.b2 import (circleShape, fixtureDef, polygonShape)
 
 import gym
+# import gymnasium as gym
 from gym import spaces
 from gym.utils import seeding
 from utils.opencv_draw import OpencvDrawFuncs

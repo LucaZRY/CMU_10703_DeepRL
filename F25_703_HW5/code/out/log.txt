@@ -24,3 +24,113 @@
 2025-10-22 19:02:12 run.py     INFO    : Test episode 0
 2025-10-22 19:05:56 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
 2025-10-22 19:05:56 run.py     INFO    : Test episode 0
+2025-10-26 00:45:42 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-26 00:56:25 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-26 00:56:25 run.py     INFO    : Test episode 0
+2025-10-26 00:56:26 run.py     INFO    : Test episode 9
+2025-10-26 00:56:27 run.py     INFO    : Test episode 19
+2025-10-26 00:56:28 run.py     INFO    : Test episode 29
+2025-10-26 00:56:29 run.py     INFO    : Test episode 39
+2025-10-26 00:56:30 run.py     INFO    : Test episode 49
+2025-10-26 00:56:30 run.py     INFO    : CEM PushingEnv: avg_reward: -4.92, avg_success: 0.0
+2025-10-26 00:56:30 run.py     INFO    : ### Q1.1.2: Random Policy (without MPC)
+2025-10-26 00:56:30 run.py     INFO    : Test episode 0
+2025-10-26 00:56:31 run.py     INFO    : Test episode 9
+2025-10-26 00:56:32 run.py     INFO    : Test episode 19
+2025-10-26 00:56:33 run.py     INFO    : Test episode 29
+2025-10-26 00:56:33 run.py     INFO    : Test episode 39
+2025-10-26 00:56:34 run.py     INFO    : Test episode 49
+2025-10-26 00:56:35 run.py     INFO    : Random PushingEnv: avg_reward: -4.92, avg_success: 0.0
+2025-10-26 00:56:35 run.py     INFO    : ### Q1.1.2: Random Policy + MPC
+2025-10-26 00:56:35 run.py     INFO    : Test episode 0
+2025-10-26 00:56:35 run.py     INFO    : Test episode 9
+2025-10-26 00:56:36 run.py     INFO    : Test episode 19
+2025-10-26 00:56:37 run.py     INFO    : Test episode 29
+2025-10-26 00:56:38 run.py     INFO    : Test episode 39
+2025-10-26 00:56:39 run.py     INFO    : Test episode 49
+2025-10-26 00:56:39 run.py     INFO    : Random + MPC PushingEnv: avg_reward: -1.0, avg_success: 0.0
+2025-10-26 00:56:39 run.py     INFO    : ### Q1.1.3:
+2025-10-26 00:56:39 run.py     INFO    : Test episode 0
+2025-10-26 00:56:40 run.py     INFO    : Test episode 9
+2025-10-26 00:56:41 run.py     INFO    : Test episode 19
+2025-10-26 00:56:42 run.py     INFO    : Test episode 29
+2025-10-26 00:56:43 run.py     INFO    : Test episode 39
+2025-10-26 00:56:44 run.py     INFO    : Test episode 49
+2025-10-26 00:56:44 run.py     INFO    : CEM Pushing2D: avg_reward: -4.92, avg_success: 0.0
+2025-10-26 00:56:44 run.py     INFO    : Test episode 0
+2025-10-26 00:56:45 run.py     INFO    : Test episode 9
+2025-10-26 00:56:46 run.py     INFO    : Test episode 19
+2025-10-26 00:56:47 run.py     INFO    : Test episode 29
+2025-10-26 00:56:48 run.py     INFO    : Test episode 39
+2025-10-26 00:56:49 run.py     INFO    : Test episode 49
+2025-10-26 00:56:49 run.py     INFO    : CEM + MPC Pushing2D: avg_reward: -1.0, avg_success: 0.0
+2025-10-26 00:56:49 run.py     INFO    : Test episode 0
+2025-10-26 00:56:50 run.py     INFO    : Test episode 9
+2025-10-26 00:56:51 run.py     INFO    : Test episode 19
+2025-10-26 00:56:52 run.py     INFO    : Test episode 29
+2025-10-26 00:56:53 run.py     INFO    : Test episode 39
+2025-10-26 00:56:55 run.py     INFO    : Test episode 49
+2025-10-26 00:56:55 run.py     INFO    : CEM Pushing2DNoisyControl: avg_reward: -4.92, avg_success: 0.0
+2025-10-26 00:56:55 run.py     INFO    : Test episode 0
+2025-10-26 00:56:56 run.py     INFO    : Test episode 9
+2025-10-26 00:56:57 run.py     INFO    : Test episode 19
+2025-10-26 00:56:58 run.py     INFO    : Test episode 29
+2025-10-26 00:56:59 run.py     INFO    : Test episode 39
+2025-10-26 00:57:00 run.py     INFO    : Test episode 49
+2025-10-26 00:57:00 run.py     INFO    : CEM + MPC Pushing2DNoisyControl: avg_reward: -1.0, avg_success: 0.0
+2025-10-26 00:57:00 run.py     INFO    : ### Q1.2.1: Train a single dynamics model f(s, a, phi) using a random policy
+2025-10-26 00:57:04 run.py     INFO    : ### Q1.2.1: Train from 1000 randomly sampled episodes with 100 iterations
+2025-10-26 00:57:04 run.py     INFO    : Warm up episode 0
+2025-10-26 00:57:04 run.py     INFO    : Warm up episode 99
+2025-10-26 00:57:04 run.py     INFO    : Warm up episode 199
+2025-10-26 00:57:04 run.py     INFO    : Warm up episode 299
+2025-10-26 00:57:04 run.py     INFO    : Warm up episode 399
+2025-10-26 00:57:04 run.py     INFO    : Warm up episode 499
+2025-10-26 00:57:05 run.py     INFO    : Warm up episode 599
+2025-10-26 00:57:05 run.py     INFO    : Warm up episode 699
+2025-10-26 00:57:05 run.py     INFO    : Warm up episode 799
+2025-10-26 00:57:05 run.py     INFO    : Warm up episode 899
+2025-10-26 00:57:05 run.py     INFO    : Warm up episode 999
+2025-10-26 00:57:05 mpc.py     INFO    : Train dynamics model with CEM for 100 iterations
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-26 00:57:09 run.py     INFO    : ### Q1.2.2: Test with Random Policy for 50 episodes
+2025-10-26 00:57:09 run.py     INFO    : Test episode 0
