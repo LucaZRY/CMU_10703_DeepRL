@@ -161,104 +161,59 @@ class MPC:
         # REMEMBER: model prediction is delta
         # Next state = delta sampled from model prediction + CURRENT state!
 
-        if isinstance(states, torch.Tensor):
-            states = states.detach().cpu().numpy()
-        if isinstance(actions, torch.Tensor):
-            actions = actions.detach().cpu().numpy()
+        device   = self.model.device
+        state_t  = torch.as_tensor(states, dtype=torch.float32, device=device)
+        action_t = torch.as_tensor(actions, dtype=torch.float32, device=device)
 
-        popsize_particles = states.shape[0]           # popsize * num_particles
-        assert popsize_particles % self.num_particles == 0
-        popsize = actions.shape[0]
-        assert popsize * self.num_particles == popsize_particles
+        B       = state_t.shape[0]
+        popsize = action_t.shape[0]
+        assert popsize * self.num_particles == B
 
-        # Tile actions so each action is repeated for num_particles rows
-        # shapes: (popsize, action_dim) -> (popsize * num_particles, action_dim)
-        tiled_actions = np.repeat(actions, repeats=self.num_particles, axis=0)
+        tiled_acts  = action_t.repeat_interleave(self.num_particles, dim = 0)
+        inp         = torch.cat([state_t, tiled_acts], dim = 1)
 
-        # Inputs to dynamics model are [s, a]
-        inputs = np.concatenate([states, tiled_actions], axis=1)  # (B, state_dim+action_dim), B = popsize*num_particles
+        outs   = self.model(inp)
+        means  = torch.stack([m for (m,v) in outs], dim = 0)
+        logvar = torch.stack([v for (m, v) in outs], dim=0)
 
-        # Model.predict returns a list (len = num_nets) of (mean, logvar),
-        # each of shape (B, state_dim). Convert to numpy if tensors.
-        # NOTE: The model predicts delta, not absolute next state!
-        preds = self.model.predict(inputs)  # [(mean_i, logvar_i) for i in 0..num_nets-1]
+        N = means.shape[0]
+        assert N == self.num_nets
 
-        means = []
-        logvars = []
-        for mean_i, logvar_i in preds:
-            if isinstance(mean_i, torch.Tensor):
-                mean_i = mean_i.detach().cpu().numpy()
-            if isinstance(logvar_i, torch.Tensor):
-                logvar_i = logvar_i.detach().cpu().numpy()
-            means.append(mean_i)     # (B, state_dim)
-            logvars.append(logvar_i) # (B, state_dim)
+        # TS1: choose one net per sample row
+        net_idx = torch.randint(low=0, high=N, size=(B,), device=device)  # (B,)
+        row     = torch.arange(B, device=device)
 
-        means = np.stack(means, axis=0)     # (num_nets, B, state_dim)
-        logvars = np.stack(logvars, axis=0) # (num_nets, B, state_dim)
-
-        num_nets = means.shape[0]
-        B = means.shape[1]
-        assert num_nets == self.num_nets and B == popsize_particles
-
-        # TS1: choose one network per sample (row), uniformly at random
-        net_idx = np.random.randint(low=0, high=num_nets, size=(B,))  # (B,)
-
-        # Gather the chosen (mean, logvar) per row
-        row_idx = np.arange(B)
-        chosen_mean = means[net_idx, row_idx, :]     # (B, state_dim)
-        chosen_logvar = logvars[net_idx, row_idx, :] # (B, state_dim)
+        chosen_mean   = means[net_idx, row, :]    # (B, S)
+        chosen_logvar = logvar[net_idx, row, :]   # (B, S)
 
         # Sample delta ~ N(mean, diag(exp(logvar)))
-        std = np.sqrt(np.exp(chosen_logvar))
-        eps = np.random.randn(*std.shape)
-        delta = chosen_mean + eps * std              # (B, state_dim)
+        std   = torch.exp(0.5 * chosen_logvar)
+        delta = chosen_mean + torch.randn_like(std) * std  # (B, S)
 
-        # Next state = current state + predicted delta
-        next_states = states + delta
-        return next_states
+        # Next = current + delta  (model predicts delta)
+        next_t = state_t + delta
 
+        return next_t.detach().cpu().numpy().astype(np.float32)
         # raise NotImplementedError
 
     def predict_next_state_gt(self, states, actions):
         """Given a list of state action pairs, use the ground truth dynamics to predict the next state"""
         # TODO: write your code here
+        states  = np.asarray(states,  dtype=np.float32)
+        actions = np.asarray(actions, dtype=np.float32)
 
-        # B = popsize * num_particles
-        B = int(states.shape[0])
-        popsize = int(actions.shape[0])
-        assert popsize * self.num_particles == B, "Shape mismatch for states/actions vs num_particles"
+        B = states.shape[0]
+        assert actions.shape[0] == B, "actions must align 1:1 with states when using GT dynamics"
 
-        # Repeat each action across its particles
-        tiled_actions = np.repeat(actions, repeats=self.num_particles, axis=0).astype(np.float32)
-
+        env = getattr(self.env, "unwrapped", self.env)
         next_states = np.empty((B, self.state_dim), dtype=np.float32)
 
         for i in range(B):
-            # state as float32
-            s = np.asarray(states[i], dtype=np.float32)
+            env.set_state(states[i].tolist())
 
-            # action → flat, 2 scalars
-            a = np.asarray(tiled_actions[i], dtype=np.float32).reshape(-1)
-            if a.size != self.action_dim:
-                a = a.flatten()[: self.action_dim]
-            a0, a1 = float(a[0]), float(a[1])
-          
-            if hasattr(self.env, "set_state"):
-                try:
-                    self.env.set_state(s.tolist())  # common signature
-                except TypeError:
-                    # some envs require elapsed_steps kwarg
-                    self.env.set_state(s.tolist(), elapsed_steps=0)
-            else:
-                raise RuntimeError("Environment is missing set_state(...); required for GT rollouts.")
+            a = tuple(actions[i].astype(np.float32).tolist())
+            obs_next, *_ = env.step(a)
 
-            # step once with a tuple of native floats
-            step_out = self.env.step((a0, a1))
-
-            # unwrap observation from gym's 4-tuple (obs, reward, done, info)
-            obs_next = step_out[0] if isinstance(step_out, tuple) else step_out
-
-            # observations often append goal; dynamics state is first self.state_dim entries
             next_states[i] = np.asarray(obs_next[: self.state_dim], dtype=np.float32)
 
         return next_states

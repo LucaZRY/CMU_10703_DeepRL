@@ -68,10 +68,13 @@ class PENN(nn.Module):
         # TODO: write your code here
         inv_var = torch.exp(-logvar)
         mse = (mean - targ) ** 2
-        loss = torch.mean(torch.sum(0.5 * (logvar + mse * inv_var), dim=1))
+
+        const = 0.5 * np.log(2* np.pi)
+
+        loss = torch.mean(torch.sum(0.5 * (logvar + mse * inv_var) + const, dim=1))
         return loss
 
-        raise NotImplementedError
+        # raise NotImplementedError
 
     def create_network(self, n):
         layer_sizes = [
@@ -106,16 +109,24 @@ class PENN(nn.Module):
         targets_t = targets if torch.is_tensor(targets) else torch.tensor(targets, dtype=torch.float, device=self.device)
 
         N = inputs_t.shape[0]
-        avg_losses = []
+
+
+
+        perm = np.random.permutation(N)
+        val_n = max( int(0.1 * N), batch_size )  # at least one batch
+        val_idx = torch.as_tensor(perm[:val_n], device=self.device)
+        tr_idx  = torch.as_tensor(perm[val_n:], device=self.device)
+        Xtr, Ytr = inputs_t[tr_idx],  targets_t[tr_idx]
+        Xva, Yva = inputs_t[val_idx], targets_t[val_idx]
+
+        avg_val_losses = []
 
         for _ in range(num_train_itrs):
-            losses_this_itr = []
-
+            # ---- training step for each net (bootstrap + SGD) ----
             for net in self.networks:
-                # Sample with replacement for bootstrap-style training
-                idx = np.random.choice(N, size=batch_size, replace=True)
-                batch_inp  = inputs_t[idx]
-                batch_targ = targets_t[idx]
+                idx = torch.randint(0, Xtr.shape[0], (batch_size,), device=self.device)
+                batch_inp  = Xtr[idx]
+                batch_targ = Ytr[idx]
 
                 mean, logvar = self.get_output(net(batch_inp))
                 loss = self.get_loss(batch_targ, mean, logvar)
@@ -124,10 +135,46 @@ class PENN(nn.Module):
                 loss.backward()
                 self.opt.step()
 
-                losses_this_itr.append(loss.item())
+            # ---- evaluate mean NLL on the *validation* split (smooth & stable) ----
+            with torch.no_grad():
+                val_losses_each_net = []
+                # iterate in reasonably large chunks to reduce variance further
+                bs_eval = 2048
+                for net in self.networks:
+                    total, count = 0.0, 0
+                    for start in range(0, Xva.shape[0], bs_eval):
+                        end = min(start + bs_eval, Xva.shape[0])
+                        mean, logvar = self.get_output(net(Xva[start:end]))
+                        l = self.get_loss(Yva[start:end], mean, logvar)
+                        total += l.item() * (end - start)
+                        count += (end - start)
+                    val_losses_each_net.append(total / max(count, 1))
+                avg_val_losses.append(float(np.mean(val_losses_each_net)))
 
-            avg_losses.append(float(np.mean(losses_this_itr)))
+        return avg_val_losses
 
-        return avg_losses
+        # avg_losses = []
+
+        # for _ in range(num_train_itrs):
+        #     losses_this_itr = []
+
+        #     for net in self.networks:
+        #         # Sample with replacement for bootstrap-style training
+        #         idx = np.random.choice(N, size=batch_size, replace=True)
+        #         batch_inp  = inputs_t[idx]
+        #         batch_targ = targets_t[idx]
+
+        #         mean, logvar = self.get_output(net(batch_inp))
+        #         loss = self.get_loss(batch_targ, mean, logvar)
+
+        #         self.opt.zero_grad()
+        #         loss.backward()
+        #         self.opt.step()
+
+        #         losses_this_itr.append(loss.item())
+
+        #     avg_losses.append(float(np.mean(losses_this_itr)))
+
+        # return avg_losses
 
         # raise NotImplementedError
