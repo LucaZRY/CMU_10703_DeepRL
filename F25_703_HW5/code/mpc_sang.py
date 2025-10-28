@@ -158,45 +158,72 @@ class MPC:
             :param actions : [self.popsize, self.action_dim]
         """
         # Debug: Check input shapes
-        total_states = states.shape[0]  # Should be popsize * num_particles
+        # total_states = states.shape[0]  # Should be popsize * num_particles
 
-        # Implement TS1 sampling: randomly assign networks to particles
-        next_states = []
+        # # Implement TS1 sampling: randomly assign networks to particles
+        # next_states = []
 
-        # Process each state-action pair
-        for i in range(total_states):
-            # Get current state
-            current_state = states[i]
+        # # Process each state-action pair
+        # for i in range(total_states):
+        #     # Get current state
+        #     current_state = states[i]
 
-            # Get corresponding action (actions are repeated per particle)
-            action_idx = i // self.num_particles
-            if action_idx >= actions.shape[0]:
-                action_idx = actions.shape[0] - 1
-            action = actions[action_idx]
+        #     # Get corresponding action (actions are repeated per particle)
+        #     action_idx = i // self.num_particles
+        #     if action_idx >= actions.shape[0]:
+        #         action_idx = actions.shape[0] - 1
+        #     action = actions[action_idx]
 
-            # Randomly select a network from the ensemble
-            network_idx = np.random.randint(0, self.num_nets)
+        #     # Randomly select a network from the ensemble
+        #     network_idx = np.random.randint(0, self.num_nets)
 
-            # Create state-action input for the model
-            sa_pair = np.concatenate([current_state, action]).reshape(1, -1)
+        #     # Create state-action input for the model
+        #     sa_pair = np.concatenate([current_state, action]).reshape(1, -1)
 
-            # Predict using the selected network
-            model_outputs = self.model.forward(sa_pair)
-            mean, logvar = model_outputs[network_idx]
+        #     # Predict using the selected network
+        #     model_outputs = self.model.forward(sa_pair)
+        #     mean, logvar = model_outputs[network_idx]
 
-            # Sample from the predicted distribution
-            std = torch.sqrt(torch.exp(logvar))
-            delta = torch.normal(mean, std)
+        #     # Sample from the predicted distribution
+        #     std = torch.sqrt(torch.exp(logvar))
+        #     delta = torch.normal(mean, std)
 
-            # Convert to numpy
-            if torch.is_tensor(delta):
-                delta = delta.detach().cpu().numpy()
+        #     # Convert to numpy
+        #     if torch.is_tensor(delta):
+        #         delta = delta.detach().cpu().numpy()
 
-            # Add delta to current state to get next state
-            next_state = current_state + delta.squeeze()
-            next_states.append(next_state)
+        #     # Add delta to current state to get next state
+        #     next_state = current_state + delta.squeeze()
+        #     next_states.append(next_state)
 
-        return np.array(next_states)
+        # return np.array(next_states)
+
+        actions_exp = actions[:, None, :]                                # [pop, 1, A]
+        actions_tiled = np.tile(actions_exp, (1, self.num_particles, 1)).reshape(-1, self.action_dim)
+        states_t  = torch.as_tensor(states,        dtype=torch.float, device=self.model.device)  # [B, 8]
+        actions_t = torch.as_tensor(actions_tiled, dtype=torch.float, device=self.model.device)  # [B, 2]
+        inputs_t  = torch.cat([states_t, actions_t], dim=1)                                         # [B, 10]
+
+        self.model.eval()
+        with torch.no_grad():
+            # One batched forward per net (K forwards total), not B*K
+            preds = self.model(inputs_t)                                  # list len K of (mean, logvar)
+            means  = torch.stack([m  for (m, _) in preds], dim=0)         # [K, B, 8]
+            logvar = torch.stack([lv for (_, lv) in preds], dim=0)        # [K, B, 8]
+
+            B = inputs_t.shape[0]
+            # TS1: pick one model per particle
+            net_idx = torch.randint(0, self.num_nets, (B,), device=self.model.device)  # [B]
+            idx_exp = net_idx.view(1, B, 1).expand(1, B, means.size(-1))
+            sel_mean  = means.gather(0, idx_exp).squeeze(0)               # [B, 8]
+            sel_logv  = logvar.gather(0, idx_exp).squeeze(0)              # [B, 8]
+            # Use deterministic mean (faster, more stable); switch to sampling if you want:
+            delta = sel_mean                                              # or: sel_mean + torch.randn_like(sel_mean)*torch.exp(0.5*sel_logv)
+
+            # Apply Δ only to state (first 6), keep goal (last 2) unchanged
+            next_6  = states_t[:, :6] + delta[:, :6]
+            next_st = torch.cat([next_6, states_t[:, 6:]], dim=1)         # [B, 8]
+            return next_st.cpu().numpy()
 
     def predict_next_state_gt(self, states, actions):
         """Given a list of state action pairs, use the ground truth dynamics to predict the next state"""

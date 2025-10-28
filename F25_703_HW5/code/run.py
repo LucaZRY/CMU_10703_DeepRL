@@ -9,7 +9,7 @@ import logging
 
 from utils import config
 from agent import Agent, RandomPolicy
-from mpc import MPC
+from mpc_sang import MPC
 from cem import CEMOptimizer
 from model import PENN
 
