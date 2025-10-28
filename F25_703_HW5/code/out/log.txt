@@ -21174,3 +21174,24 @@
 2025-10-27 23:15:35 font_manager.py WARNING : findfont: Font family 'normal' not found.
 2025-10-27 23:15:35 font_manager.py WARNING : findfont: Font family 'normal' not found.
 2025-10-27 23:15:35 font_manager.py WARNING : findfont: Font family 'normal' not found.
+2025-10-28 14:28:03 run.py     INFO    : ### Q1.1.1: CEM (without MPC)
+2025-10-28 14:28:03 run.py     INFO    : Test episode 0
+2025-10-28 14:28:04 run.py     INFO    : Test episode 9
+2025-10-28 14:28:05 run.py     INFO    : Test episode 19
+2025-10-28 14:28:06 run.py     INFO    : Test episode 29
+2025-10-28 14:28:08 run.py     INFO    : Test episode 39
+2025-10-28 14:28:09 run.py     INFO    : Test episode 49
+2025-10-28 14:28:09 run.py     INFO    : CEM PushingEnv: avg_reward: -4.92, avg_success: 0.0
+2025-10-28 14:28:09 run.py     INFO    : ### Q1.1.2: Random Policy (without MPC)
+2025-10-28 14:28:09 run.py     INFO    : Test episode 0
+2025-10-28 14:28:10 run.py     INFO    : Test episode 9
+2025-10-28 14:28:11 run.py     INFO    : Test episode 19
+2025-10-28 14:28:12 run.py     INFO    : Test episode 29
+2025-10-28 14:28:13 run.py     INFO    : Test episode 39
+2025-10-28 14:28:15 run.py     INFO    : Test episode 49
+2025-10-28 14:28:15 run.py     INFO    : Random PushingEnv: avg_reward: -4.92, avg_success: 0.0
+2025-10-28 14:28:15 run.py     INFO    : ### Q1.1.2: Random Policy + MPC
+2025-10-28 14:28:15 run.py     INFO    : Test episode 0
+2025-10-28 14:28:16 run.py     INFO    : Test episode 9
+2025-10-28 14:28:17 run.py     INFO    : Test episode 19
+2025-10-28 14:28:18 run.py     INFO    : Test episode 29
