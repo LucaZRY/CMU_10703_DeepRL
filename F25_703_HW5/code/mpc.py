@@ -161,62 +161,73 @@ class MPC:
         # REMEMBER: model prediction is delta
         # Next state = delta sampled from model prediction + CURRENT state!
 
-        device   = self.model.device
-        state_t  = torch.as_tensor(states, dtype=torch.float32, device=device)
-        action_t = torch.as_tensor(actions, dtype=torch.float32, device=device)
+        
+        actions_expanded = actions[:, np.newaxis, :]                 # [popsize, 1, act_dim]
+        actions_tiled = np.tile(actions_expanded, (1, self.num_particles, 1)).reshape(-1, self.action_dim)
 
-        B       = state_t.shape[0]
-        popsize = action_t.shape[0]
-        assert popsize * self.num_particles == B
+        states_tensor  = torch.tensor(states,        device=self.model.device, dtype=torch.float)  # [B, 8]
+        actions_tensor = torch.tensor(actions_tiled, device=self.model.device, dtype=torch.float)  # [B, 2]
+        inputs_tensor  = torch.cat((states_tensor, actions_tensor), dim=1)                         # [B, 10]
 
-        tiled_acts  = action_t.repeat_interleave(self.num_particles, dim = 0)
-        inp         = torch.cat([state_t, tiled_acts], dim = 1)
+        self.model.eval()
+        with torch.no_grad():
+            # predictions from all nets via PENN.forward()
+            preds = self.model(inputs_tensor)                          # list of (mean, logvar), len = num_nets
+            means  = torch.stack([m  for (m, lv) in preds], dim=0)     # [K, B, 8]  (because PENN.state_dim == 8)
+            logvar = torch.stack([lv for (m, lv) in preds], dim=0)     # [K, B, 8]
 
-        outs   = self.model(inp)
-        means  = torch.stack([m for (m,v) in outs], dim = 0)
-        logvar = torch.stack([v for (m, v) in outs], dim=0)
+            # TS1: choose one net per particle
+            B = states_tensor.shape[0]
+            net_idx = torch.randint(0, self.num_nets, (B,), device=self.model.device)   # [B]
+            idx_exp = net_idx.view(1, B, 1).expand(1, B, means.size(-1))
+            sel_mean  = means.gather(0, idx_exp).squeeze(0)            # [B, 8]
+            sel_logv  = logvar.gather(0, idx_exp).squeeze(0)           # [B, 8]
 
-        N = means.shape[0]
-        assert N == self.num_nets
+            # sample delta
+            std = torch.exp(0.5 * sel_logv)
+            delta = sel_mean + torch.randn_like(std) * std             # [B, 8]
+    
+            # *** CRITICAL: only update first 6 dims; keep goal (last 2) unchanged ***
+            cur_6   = states_tensor[:, :6]
+            goal_2  = states_tensor[:, 6:]                             # unchanged
+            next_6  = cur_6 + delta[:, :6]
+            next_st = torch.cat([next_6, goal_2], dim=1)               # [B, 8]
 
-        # TS1: choose one net per sample row
-        net_idx = torch.randint(low=0, high=N, size=(B,), device=device)  # (B,)
-        row     = torch.arange(B, device=device)
-
-        chosen_mean   = means[net_idx, row, :]    # (B, S)
-        chosen_logvar = logvar[net_idx, row, :]   # (B, S)
-
-        # Sample delta ~ N(mean, diag(exp(logvar)))
-        std   = torch.exp(0.5 * chosen_logvar)
-        delta = chosen_mean + torch.randn_like(std) * std  # (B, S)
-
-        # Next = current + delta  (model predicts delta)
-        next_t = state_t + delta
-
-        return next_t.detach().cpu().numpy().astype(np.float32)
+        return next_st.cpu().numpy()
         # raise NotImplementedError
 
     def predict_next_state_gt(self, states, actions):
         """Given a list of state action pairs, use the ground truth dynamics to predict the next state"""
         # TODO: write your code here
-        states  = np.asarray(states,  dtype=np.float32)
-        actions = np.asarray(actions, dtype=np.float32)
+        # states  = np.asarray(states,  dtype=np.float32)
+        # actions = np.asarray(actions, dtype=np.float32)
 
-        B = states.shape[0]
-        assert actions.shape[0] == B, "actions must align 1:1 with states when using GT dynamics"
+        # B = states.shape[0]
+        # assert actions.shape[0] == B, "actions must align 1:1 with states when using GT dynamics"
 
-        env = getattr(self.env, "unwrapped", self.env)
-        next_states = np.empty((B, self.state_dim), dtype=np.float32)
+        # env = getattr(self.env, "unwrapped", self.env)
+        # next_states = np.empty((B, self.state_dim), dtype=np.float32)
 
-        for i in range(B):
-            env.set_state(states[i].tolist())
+        # for i in range(B):
+        #     env.set_state(states[i].tolist())
 
-            a = tuple(actions[i].astype(np.float32).tolist())
-            obs_next, *_ = env.step(a)
+        #     a = tuple(actions[i].astype(np.float32).tolist())
+        #     obs_next, *_ = env.step(a)
 
-            next_states[i] = np.asarray(obs_next[: self.state_dim], dtype=np.float32)
+        #     next_states[i] = np.asarray(obs_next[: self.state_dim], dtype=np.float32)
 
-        return next_states
+        # return next_states
+
+        actions_tiled = np.tile(actions, (self.num_particles, 1))  # [B, act_dim]
+        env = self.env.unwrapped
+
+        next_states = []
+        for i in range(states.shape[0]):
+            env.set_state(states[i])
+            step_out = env.step(actions_tiled[i])
+            s_next = step_out[0]          # works for both (obs, r, done, info) and (obs, r, term, trunc, info)
+            next_states.append(s_next[0:-2])
+        return np.asarray(next_states)
 
         # raise NotImplementedError
 

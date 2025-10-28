@@ -64,6 +64,7 @@ class ExperimentGTDynamics(object):
             )
         avg_return = np.mean([sample["reward_sum"] for sample in samples])
         avg_success = np.mean([sample["rewards"][-1] == 0 for sample in samples])
+        
         return avg_return, avg_success
 
 
