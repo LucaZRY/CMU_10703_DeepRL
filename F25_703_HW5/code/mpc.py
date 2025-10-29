@@ -157,79 +157,88 @@ class MPC:
             :param states  : [self.popsize * self.num_particles, self.state_dim]
             :param actions : [self.popsize, self.action_dim]
         """
-        # TODO: write your code here
-        # REMEMBER: model prediction is delta
-        # Next state = delta sampled from model prediction + CURRENT state!
+        # Debug: Check input shapes
+        # total_states = states.shape[0]  # Should be popsize * num_particles
 
-        
-        actions_expanded = actions[:, np.newaxis, :]                 # [popsize, 1, act_dim]
-        actions_tiled = np.tile(actions_expanded, (1, self.num_particles, 1)).reshape(-1, self.action_dim)
+        # # Implement TS1 sampling: randomly assign networks to particles
+        # next_states = []
 
-        states_tensor  = torch.tensor(states,        device=self.model.device, dtype=torch.float)  # [B, 8]
-        actions_tensor = torch.tensor(actions_tiled, device=self.model.device, dtype=torch.float)  # [B, 2]
-        inputs_tensor  = torch.cat((states_tensor, actions_tensor), dim=1)                         # [B, 10]
+        # for i in range(total_states):
+        #     # Get current state
+        #     current_state = states[i]
+
+        #     action_idx = i // self.num_particles
+        #     if action_idx >= actions.shape[0]:
+        #         action_idx = actions.shape[0] - 1
+        #     action = actions[action_idx]
+
+        #     network_idx = np.random.randint(0, self.num_nets)
+
+        #     sa_pair = np.concatenate([current_state, action]).reshape(1, -1)
+
+        #     model_outputs = self.model.forward(sa_pair)
+        #     mean, logvar = model_outputs[network_idx]
+
+        #     std = torch.sqrt(torch.exp(logvar))
+        #     delta = torch.normal(mean, std)
+
+        #     if torch.is_tensor(delta):
+        #         delta = delta.detach().cpu().numpy()
+        #     next_state = current_state + delta.squeeze()
+        #     next_states.append(next_state)
+
+        # return np.array(next_states)
+
+        actions_exp = actions[:, None, :]                                # [pop, 1, A]
+        actions_tiled = np.tile(actions_exp, (1, self.num_particles, 1)).reshape(-1, self.action_dim)
+        states_t  = torch.as_tensor(states,        dtype=torch.float, device=self.model.device)  # [B, 8]
+        actions_t = torch.as_tensor(actions_tiled, dtype=torch.float, device=self.model.device)  # [B, 2]
+        inputs_t  = torch.cat([states_t, actions_t], dim=1)                                         # [B, 10]
 
         self.model.eval()
         with torch.no_grad():
-            # predictions from all nets via PENN.forward()
-            preds = self.model(inputs_tensor)                          # list of (mean, logvar), len = num_nets
-            means  = torch.stack([m  for (m, lv) in preds], dim=0)     # [K, B, 8]  (because PENN.state_dim == 8)
-            logvar = torch.stack([lv for (m, lv) in preds], dim=0)     # [K, B, 8]
+            preds = self.model(inputs_t)                                  # list len K of (mean, logvar)
+            means  = torch.stack([m  for (m, _) in preds], dim=0)         # [K, B, 8]
+            logvar = torch.stack([lv for (_, lv) in preds], dim=0)        # [K, B, 8]
 
-            # TS1: choose one net per particle
-            B = states_tensor.shape[0]
-            net_idx = torch.randint(0, self.num_nets, (B,), device=self.model.device)   # [B]
+            B = inputs_t.shape[0]
+            # TS1: pick one model per particle
+            net_idx = torch.randint(0, self.num_nets, (B,), device=self.model.device)  # [B]
             idx_exp = net_idx.view(1, B, 1).expand(1, B, means.size(-1))
-            sel_mean  = means.gather(0, idx_exp).squeeze(0)            # [B, 8]
-            sel_logv  = logvar.gather(0, idx_exp).squeeze(0)           # [B, 8]
+            sel_mean  = means.gather(0, idx_exp).squeeze(0)               # [B, 8]
+            sel_logv  = logvar.gather(0, idx_exp).squeeze(0)              # [B, 8]
+            delta = sel_mean                                              
 
-            # sample delta
-            std = torch.exp(0.5 * sel_logv)
-            delta = sel_mean + torch.randn_like(std) * std             # [B, 8]
-    
-            # *** CRITICAL: only update first 6 dims; keep goal (last 2) unchanged ***
-            cur_6   = states_tensor[:, :6]
-            goal_2  = states_tensor[:, 6:]                             # unchanged
-            next_6  = cur_6 + delta[:, :6]
-            next_st = torch.cat([next_6, goal_2], dim=1)               # [B, 8]
-
-        return next_st.cpu().numpy()
-        # raise NotImplementedError
+            next_6  = states_t[:, :6] + delta[:, :6]
+            next_st = torch.cat([next_6, states_t[:, 6:]], dim=1)         # [B, 8]
+            return next_st.cpu().numpy()
 
     def predict_next_state_gt(self, states, actions):
         """Given a list of state action pairs, use the ground truth dynamics to predict the next state"""
-        # TODO: write your code here
-        # states  = np.asarray(states,  dtype=np.float32)
-        # actions = np.asarray(actions, dtype=np.float32)
-
-        # B = states.shape[0]
-        # assert actions.shape[0] == B, "actions must align 1:1 with states when using GT dynamics"
-
-        # env = getattr(self.env, "unwrapped", self.env)
-        # next_states = np.empty((B, self.state_dim), dtype=np.float32)
-
-        # for i in range(B):
-        #     env.set_state(states[i].tolist())
-
-        #     a = tuple(actions[i].astype(np.float32).tolist())
-        #     obs_next, *_ = env.step(a)
-
-        #     next_states[i] = np.asarray(obs_next[: self.state_dim], dtype=np.float32)
-
-        # return next_states
-
-        actions_tiled = np.tile(actions, (self.num_particles, 1))  # [B, act_dim]
-        env = self.env.unwrapped
-
         next_states = []
-        for i in range(states.shape[0]):
-            env.set_state(states[i])
-            step_out = env.step(actions_tiled[i])
-            s_next = step_out[0]          # works for both (obs, r, done, info) and (obs, r, term, trunc, info)
-            next_states.append(s_next[0:-2])
-        return np.asarray(next_states)
 
-        # raise NotImplementedError
+        original_goal = self.env.goal_pos.copy()
+        original_elapsed_steps = self.env.elapsed_steps
+
+        for i in range(states.shape[0]):
+            current_state = states[i]
+            action = actions[i % actions.shape[0]]  
+
+            self.env.reset()
+
+            if len(current_state) >= 10:
+                self.env.set_state(current_state.tolist())
+            else:
+                full_state = np.concatenate([current_state, self.goal])
+                self.env.set_state(full_state.tolist())
+
+            next_state, _, _, _ = self.env.step(action)
+            next_states.append(next_state[:8])
+
+        self.env.goal_pos = original_goal
+        self.env.elapsed_steps = original_elapsed_steps
+
+        return np.array(next_states)
 
     def train(self, obs_trajs, acs_trajs, rews_trajs, num_train_itrs=5):
         """
