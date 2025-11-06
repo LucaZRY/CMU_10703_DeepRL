@@ -208,12 +208,18 @@ class TD3Agent:
 
             if self.bc_regularization_weight > 0:
                 # ------ Problem 1.2: BC regularization loss ------
-                bc_loss = torch.zeros((), device=self.device)
+                # bc_loss = torch.zeros((), device=self.device)   # 1.2
+
+                bc_loss = torch.mean((actions_pi - actions) ** 2)   # 1.3
+
+                    # Combine with the standard TD3/DDPG actor objective
+                actor_loss = ddpg_policy_loss + self.bc_regularization_weight * bc_loss     # 1.3
+
                 # If the python interpreter reaches this line, it will open PDB.
                 # You can then inspect variables and step through the code.
-                breakpoint()
+                # breakpoint()
                 ### BEGIN STUDENT SOLUTION - 1.2 ###
-                raise NotImplementedError()  # Remove this line when implementing the solution
+                # raise NotImplementedError()  # Remove this line when implementing the solution
                 ### END STUDENT SOLUTION - 1.2 ###
 
             self.actor_opt.zero_grad()
@@ -246,7 +252,7 @@ class TD3Agent:
         next_obs = batch["next_obs"]
         batch_size = obs.shape[0]
 
-        breakpoint()
+        # breakpoint()
         # Use these variable names so that the plots pick up on the values.
         cql_loss = torch.zeros((), device=self.device)
         current_action_q1_values = torch.zeros(
@@ -268,7 +274,43 @@ class TD3Agent:
         # Note: elf.cql_n_actions indicates how many random actions to sample for each element in the batch.
 
         ### BEGIN STUDENT SOLUTION - 2.1 ###
-        raise NotImplementedError()  # Remove this line when implementing the solution
+        # raise NotImplementedError()  # Remove this line when implementing the solution
+        B = obs.shape[0]
+        A = self.act_dim
+        N = self.cql_n_actions
+        temp = self.cql_temp
+
+        # 1) In-distribution Q for dataset actions
+        q_pred = self.critic1(obs, batch["actions"]).squeeze(-1)  # shape: [B]
+
+        # 2) Random actions, uniform in action bounds
+        low = self.act_low.view(1, 1, A)     # [1,1,A]
+        high = self.act_high.view(1, 1, A)   # [1,1,A]
+        rand_actions = torch.rand(B, N, A, device=self.device) * (high - low) + low  # [B,N,A]
+
+        # Q(s, a_rand): expand obs over N, flatten, run critic, then reshape back
+        obs_exp = obs.unsqueeze(1).expand(-1, N, -1).reshape(B * N, -1)          # [B*N, obs_dim]
+        rand_actions_flat = rand_actions.reshape(B * N, -1)                       # [B*N, A]
+        q_rand = self.critic1(obs_exp, rand_actions_flat).view(B, N)              # [B,N]
+
+        # 3) Policy actions at s and s' (evaluated at s)
+        pi_s = self.actor(obs).mean_action                                      # [B,A]
+        pi_sp = self.actor(next_obs).mean_action                                # [B,A]
+        q_pi_s = self.critic1(obs,          pi_s).squeeze(-1)                   # [B]
+        q_pi_sp_as_s = self.critic1(obs,    pi_sp).squeeze(-1)                   # [B]
+
+        # 4) CQL loss: logsumexp over candidates then minus in-distribution Q
+        # Concatenate candidates along "actions" axis: [B, N + 2]
+        candidates = torch.cat(
+            [q_rand, q_pi_s.unsqueeze(1), q_pi_sp_as_s.unsqueeze(1)], dim=1
+        )  # [B, N+2]
+
+        lse = torch.logsumexp(candidates / max(1e-6, temp), dim=1) * max(1e-6, temp)  # [B]
+        cql_loss = (lse - q_pred).mean()
+
+        # For logging
+        current_action_q1_values = q_pi_s.unsqueeze(1).detach()                 # [B,1]
+        random_action_q1_values = q_rand.detach()                               # [B,N]
         ### END STUDENT SOLUTION - 2.1 ###
 
         return cql_loss, {

@@ -38,7 +38,7 @@ def get_buffer_and_environments_for_task(
     offline_buffer = None
     eval_env = None
 
-    breakpoint()
+    # breakpoint()
 
     # ------ Problem 1.1: Loading the offline dataset into the replay buffer, creating the evaluation environment ------
     # You should reference the Minari documentation to load the offline dataset and create the evaluation environment.
@@ -50,7 +50,116 @@ def get_buffer_and_environments_for_task(
     # in pdb and inspect which fields are available with `p dir(object)`.
 
     ### BEGIN STUDENT SOLUTION - 1.1###
-    raise NotImplementedError("Student exercise: complete the code for Problem 1.1")
+    # raise NotImplementedError("Student exercise: complete the code for Problem 1.1")
+
+    # dataset = minari.load_dataset(minari_dataset_name)
+
+    # # 2) Build an eval env that matches the dataset’s env spec
+    # env_id = dataset.env_spec.id  # e.g., "Hopper-v4"
+    # eval_env = gym.make(env_id, render_mode="rgb_array")
+
+    # # 3) Allocate an offline buffer sized to the dataset
+    # assert isinstance(eval_env.observation_space, gym.spaces.Box)
+    # assert isinstance(eval_env.action_space, gym.spaces.Box)
+    # obs_dim = int(np.prod(eval_env.observation_space.shape))
+    # act_dim = int(np.prod(eval_env.action_space.shape))
+
+    # offline_buffer = Buffer(
+    #     size=dataset.total_steps,
+    #     obs_dim=obs_dim,
+    #     act_dim=act_dim,
+    #     device=device,
+    # )
+
+    # # 4) Stream all transitions (s, a, r, s', done) into the buffer
+    # #
+    # # Minari provides episode objects with arrays:
+    # #   observations: [T+1, obs_dim]
+    # #   actions:      [T,   act_dim]
+    # #   rewards:      [T]
+    # #   terminations: [T] (bool)
+    # #   truncations:  [T] (bool)
+    # #
+    # # Prefer dataset.iterate_episodes() if present, otherwise fall back to
+    # # dataset.recover_episodes() which returns the full list.
+    # if hasattr(dataset, "iterate_episodes"):
+    #     episode_iter = dataset.iterate_episodes()
+    # else:
+    #     episode_iter = dataset.recover_episodes()
+
+    # for ep in episode_iter:
+    #     obs = ep.observations
+    #     acts = ep.actions
+    #     rews = ep.rewards
+    #     terms = getattr(ep, "terminations", np.zeros_like(rews, dtype=bool))
+    #     truncs = getattr(ep, "truncations", np.zeros_like(rews, dtype=bool))
+
+    #     # obs has T+1 entries; others have T
+    #     T = len(acts)
+    #     for t in range(T):
+    #         s = obs[t]
+    #         a = acts[t]
+    #         r = float(rews[t])
+    #         s_next = obs[t + 1]
+    #         done = bool(terms[t] or truncs[t])
+
+    #         offline_buffer.add(
+    #             obs=s,
+    #             next_obs=s_next,
+    #             action=a,
+    #             reward=r,
+    #             done=float(done),
+    #         )
+
+
+
+    dataset = minari.load_dataset(minari_dataset_name)
+    eval_env = dataset.recover_environment()
+
+    # 2) Your Buffer expects scalar dims and keyword 'size'
+    obs_dim = int(eval_env.observation_space.shape[0])
+    act_dim = int(eval_env.action_space.shape[0])
+    offline_buffer = Buffer(
+        size=dataset.total_steps,
+        obs_dim=obs_dim,
+        act_dim=act_dim,
+        device=device,
+    )  # matches Buffer.__init__:contentReference[oaicite:0]{index=0}
+
+    # Build an episode iterator compatible with this Minari version
+    if hasattr(dataset, "episodes"):                             # common path
+        episodes_iter = dataset.episodes
+    elif hasattr(dataset, "filter_episodes"):                    # fallback: get all
+        episodes_iter = dataset.filter_episodes(lambda ep: True)
+    else:
+        raise AttributeError("This Minari version does not expose episodes")
+
+    # Helper: convert to torch (correct dtype/device for your preallocated tensors)
+    to_t = lambda x: torch.as_tensor(x, dtype=torch.float32, device=device)
+
+    # Stream transitions; derive next_obs by shifting if not provided by the dataset
+    for ep in episodes_iter:
+        # EpisodeData typically exposes these fields (no next_observations on your build)
+        observations = ep.observations
+        actions = ep.actions
+        rewards = ep.rewards
+        terminations = ep.terminations
+        truncations = ep.truncations
+
+        n = len(actions)  # transitions count
+        for i in range(n):
+            done = bool(terminations[i] or truncations[i])
+            # derive next_obs by shifting observations; last step falls back to last obs
+            next_obs_i = observations[i + 1] if (i + 1) < len(observations) else observations[i]
+
+            # Buffer.add(obs, next_obs, action, log_probs=..., reward=..., done=..., ...):contentReference[oaicite:1]{index=1}
+            offline_buffer.add(
+                to_t(observations[i]),
+                to_t(next_obs_i),
+                to_t(actions[i]),
+                reward=float(rewards[i]),
+                done=float(done),
+            )
     ### END STUDENT SOLUTION - 1.1###
 
     assert (
